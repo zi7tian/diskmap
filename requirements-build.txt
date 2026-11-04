@@ -1,0 +1,5 @@
+# 打包所需依赖：python -m pip install -r requirements-build.txt
+pyinstaller>=6.11,<7
+psutil>=6.1,<8
+# Windows（Edge WebView2）和 macOS（系统 WebKit）上的独立窗口
+pywebview>=5.3,<7; sys_platform == "win32" or sys_platform == "darwin"

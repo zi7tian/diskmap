@@ -1,0 +1,4 @@
+# 从源码运行时的可选依赖：python -m pip install -r requirements.txt
+# Linux 上不装也能完整运行；Windows / macOS 上需要 psutil 来识别"正在使用"的文件。
+psutil>=6.1
+pywebview>=5.3; sys_platform == "win32" or sys_platform == "darwin"

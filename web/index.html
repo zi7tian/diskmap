@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DiskMap 磁盘地图</title>
+<link rel="icon" type="image/png" href="/static/favicon.png">
+<link rel="stylesheet" href="/static/style.css">
+<script>window.DISKMAP_TOKEN = "__DISKMAP_TOKEN__";</script>
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
+      <rect x="2" y="2" width="20" height="20" rx="3" fill="none" stroke="currentColor" stroke-width="1.6"/>
+      <rect x="4.5" y="4.5" width="8" height="15" rx="1" fill="var(--c-system)"/>
+      <rect x="14" y="4.5" width="5.5" height="7" rx="1" fill="var(--c-user)"/>
+      <rect x="14" y="13" width="5.5" height="6.5" rx="1" fill="var(--c-running)"/>
+    </svg>
+    <span>DiskMap</span><small>磁盘地图</small>
+  </div>
+  <form id="scanForm" class="scanform" autocomplete="off">
+    <input id="pathInput" type="text" value="/" spellcheck="false" aria-label="要扫描的文件夹">
+    <label class="chk" title="扫描时进入其他磁盘分区（如单独挂载的 /home、/boot）">
+      <input type="checkbox" id="crossFs" checked> 包含其他分区
+    </label>
+    <select id="sizeMode" title="统计方式" aria-label="统计方式">
+      <option value="disk">实际占用空间</option>
+      <option value="apparent">文件大小</option>
+    </select>
+    <button type="submit" id="scanBtn" class="btn primary">扫描</button>
+    <button type="button" id="cancelBtn" class="btn" hidden>停止</button>
+  </form>
+  <div class="grow"></div>
+  <button id="procBtn" class="btn ghost" title="重新读取正在运行的程序及其打开的文件">
+    <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9M13.5 2.5v3h-3" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    刷新运行状态
+  </button>
+</header>
+
+<div class="progress" id="progress" hidden><div class="bar"></div></div>
+
+<nav class="crumbs" id="crumbsBar">
+  <button id="upBtn" class="btn ghost small" title="返回上一级（Backspace / 右键）" disabled>
+    <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M8 13V3M3.5 7.5 8 3l4.5 4.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    上一级
+  </button>
+  <div id="crumbs" class="crumb-list"></div>
+  <div class="grow"></div>
+  <div id="viewSize" class="view-size"></div>
+</nav>
+
+<main>
+  <section class="mapwrap" id="mapwrap">
+    <canvas id="map"></canvas>
+    <canvas id="overlay"></canvas>
+    <div id="tooltip" class="tooltip" hidden></div>
+
+    <div id="welcome" class="welcome">
+      <div class="welcome-inner">
+        <h1>看看磁盘空间都去哪儿了</h1>
+        <p class="lead">每个方框代表一个文件或文件夹，面积就是它占用的空间；文件夹里套着它的子文件夹和文件。
+          颜色表示重要程度——红色是正在运行的程序正在使用的文件，紫色是系统核心，绿色通常可以放心清理。</p>
+        <h2>选择要扫描的位置</h2>
+        <div id="disks" class="disks"></div>
+        <p class="hint">也可以在上方输入任意文件夹路径后点“扫描”。<span id="welcomeHint"></span></p>
+        <p class="hint version">DiskMap <span id="version"></span> · 只读取磁盘，不会删除或修改任何文件</p>
+      </div>
+    </div>
+    <div id="busy" class="busy" hidden></div>
+  </section>
+
+  <aside class="side">
+    <section class="panel">
+      <h2>重要程度 <span class="h-note">当前视图</span></h2>
+      <ul id="legend" class="legend"></ul>
+      <p class="legend-hint">悬停查看分布，点击只突出显示该类别</p>
+    </section>
+    <section class="panel detail-panel">
+      <h2>详情</h2>
+      <div id="detail" class="detail"><p class="muted">点击方框查看详情，双击进入文件夹。</p></div>
+    </section>
+    <section class="panel">
+      <h2>当前视图中最大的文件</h2>
+      <ol id="topFiles" class="topfiles"></ol>
+    </section>
+  </aside>
+</main>
+
+<footer class="status" id="status">准备就绪</footer>
+<div id="toast" class="toast" hidden></div>
+<script src="/static/app.js"></script>
+</body>
+</html>
