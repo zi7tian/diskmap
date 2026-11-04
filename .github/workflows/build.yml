@@ -44,15 +44,24 @@ jobs:
 
       - name: 自检（Windows）
         if: runner.os == 'Windows'
+        timeout-minutes: 6
         shell: pwsh
         run: |
-          # 无控制台的程序要用 Start-Process -Wait 才能等它结束并拿到退出码
-          $p = Start-Process -FilePath dist\DiskMap.exe -ArgumentList '--selftest','--report','selftest.json' -Wait -PassThru
+          # 无控制台的程序不会被 shell 等待，用 WaitForExit 等它结束（最多 4 分钟）并拿到退出码
+          $p = Start-Process -FilePath dist\DiskMap.exe -ArgumentList '--selftest','--report','selftest.json' -PassThru
+          $null = $p.Handle   # 先取句柄，否则进程结束后 ExitCode 可能读不到
+          if (-not $p.WaitForExit(240000)) {
+            Write-Host "自检超时，结束进程"
+            Get-Process DiskMap -ErrorAction SilentlyContinue | Stop-Process -Force
+            if (Test-Path selftest.json) { Get-Content selftest.json }
+            exit 1
+          }
           Get-Content selftest.json
           if ($p.ExitCode -ne 0) { exit 1 }
 
       - name: 自检（macOS / Linux）
         if: runner.os != 'Windows'
+        timeout-minutes: 6
         shell: bash
         run: |
           if [ "$RUNNER_OS" = macOS ]; then BIN=dist/DiskMap.app/Contents/MacOS/DiskMap; else BIN=dist/DiskMap; fi

@@ -24,11 +24,17 @@ import time
 import urllib.parse
 import webbrowser
 
-# 打包成无控制台的 Windows 程序时 stdout/stderr 为 None，写入会报错
-if sys.stdout is None:
-    sys.stdout = open(os.devnull, "w")
-if sys.stderr is None:
-    sys.stderr = open(os.devnull, "w")
+# 打包成无控制台的 Windows 程序时 stdout/stderr 为 None。替换成空设备时必须指定 UTF-8，
+# 否则英文版 Windows 默认用 cp1252 编码，一输出中文就抛异常（窗口模式下会弹出错误框卡住）。
+for _name in ("stdout", "stderr"):
+    _stream = getattr(sys, _name)
+    if _stream is None:
+        setattr(sys, _name, open(os.devnull, "w", encoding="utf-8"))
+    else:
+        try:
+            _stream.reconfigure(errors="replace")   # 控制台编码不支持中文时用 ? 代替而不是崩溃
+        except (AttributeError, ValueError):
+            pass
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -206,17 +212,39 @@ def run_ui(url, app, prefer_browser, only=None):
 
 
 # ------------------------------------------------------------------ 自检
-def selftest(report_path=None):
-    """不打开窗口，走一遍完整流程：页面、扫描、树数据、详情、运行状态。供 CI 检验打包结果。"""
+def selftest(report_path=None, limit=150):
+    """不打开窗口，走一遍完整流程：页面、扫描、树数据、详情、运行状态。供 CI 检验打包结果。
+
+    无论成功、失败还是卡住（超过 limit 秒），都会写出报告并结束进程。
+    """
     import tempfile
     import urllib.request
     results = []
     ok = True
+    step = ["启动"]
+    lock = threading.Lock()
 
     def check(name, cond, detail=""):
         nonlocal ok
         ok = ok and bool(cond)
         results.append({"check": name, "ok": bool(cond), "detail": str(detail)[:300]})
+
+    def finish(code):
+        with lock:
+            report = {"ok": code == 0, "version": __version__, "platform": sys.platform,
+                      "frozen": FROZEN, "results": results}
+            text = json.dumps(report, ensure_ascii=False, indent=2)
+            if report_path:
+                with open(report_path, "w", encoding="utf-8") as f:
+                    f.write(text)
+            print(text, flush=True)
+            os._exit(code)
+
+    def watchdog():
+        time.sleep(limit)
+        check("超时", False, f"超过 {limit} 秒仍未完成，卡在：{step[0]}")
+        finish(3)
+    threading.Thread(target=watchdog, daemon=True).start()
 
     token = "selftest-token"
     httpd, url, app = serve(0, token)
@@ -224,6 +252,7 @@ def selftest(report_path=None):
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))  # 不走系统代理
 
     def call(path, body=None, auth=True):
+        step[0] = path.split("?")[0]
         headers = {"X-DiskMap-Token": token} if auth else {}
         data = None
         if body is not None:
@@ -274,20 +303,13 @@ def selftest(report_path=None):
         procs = json.loads(raw)["procs"]
         check("读取运行中的程序", procs["total"] > 0 and not procs["error"], procs)
         check("识别正在使用的文件", procs["files"] > 0, procs["files"])
-    except Exception as e:
+    except BaseException as e:
         check("异常", False, repr(e))
     finally:
+        step[0] = "清理"
         httpd.shutdown()
         shutil.rmtree(tmp, ignore_errors=True)
-
-    report = {"ok": ok, "version": __version__, "platform": sys.platform,
-              "frozen": FROZEN, "results": results}
-    text = json.dumps(report, ensure_ascii=False, indent=2)
-    if report_path:
-        with open(report_path, "w", encoding="utf-8") as f:
-            f.write(text)
-    print(text)
-    return 0 if ok else 1
+    finish(0 if ok else 1)
 
 
 # ------------------------------------------------------------------ 入口
@@ -313,7 +335,7 @@ def main():
     VERBOSE = args.verbose
 
     if args.selftest:
-        sys.exit(selftest(args.report))
+        selftest(args.report)   # 内部会结束进程
 
     httpd, url, app = serve(args.port, args.token)
     if args.path:
