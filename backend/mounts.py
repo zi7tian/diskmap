@@ -97,7 +97,9 @@ def disk_mounts():
     for mp, info in sorted(read_mounts().items()):
         if info["fstype"] not in DISK_FS or info.get("hidden") or info.get("removable"):
             continue
-        if IS_MAC and mp != "/" and mp.startswith(MAC_SKIP):
+        # macOS 还会挂载很多系统内部卷（/System/Volumes/*、/System/Library/AssetsV2/… 等），
+        # 用户能看到的磁盘只有 / 和 /Volumes 下的外接磁盘
+        if IS_MAC and mp != "/" and not mp.startswith("/Volumes/"):
             continue
         key = info["source"]
         if key in seen and mp != sysroot:
