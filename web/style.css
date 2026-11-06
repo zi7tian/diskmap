@@ -268,3 +268,33 @@ main { flex: 1; display: grid; grid-template-columns: 1fr 320px; min-height: 0; 
   .brand small, .chk, #sizeMode { display: none; }
   .topbar { gap: 8px; padding: 8px 10px; }
 }
+
+/* ------------------------------------------------ AI 接入 */
+.ai-btn { position: relative; }
+.ai-dot {
+  width: 7px; height: 7px; border-radius: 50%; background: var(--c-cache);
+  box-shadow: 0 0 0 0 var(--c-cache); animation: ai-pulse 1.8s ease-out infinite;
+}
+@keyframes ai-pulse {
+  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--c-cache) 60%, transparent); }
+  100% { box-shadow: 0 0 0 7px transparent; }
+}
+.toast.agent { border-color: var(--accent); max-width: min(560px, 90vw); }
+.ai-dialog {
+  width: min(680px, calc(100vw - 32px)); max-height: calc(100vh - 48px); overflow: auto;
+  padding: 20px 22px; border: 1px solid var(--border); border-radius: 12px;
+  background: var(--panel); color: var(--text); box-shadow: var(--shadow);
+}
+.ai-dialog::backdrop { background: rgba(0, 0, 0, .45); }
+.ai-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.ai-head h2 { margin: 0; font-size: 17px; }
+.ai-dialog h3 { margin: 18px 0 4px; font-size: 13px; }
+.ai-lead { color: var(--muted); line-height: 1.7; margin: 10px 0 6px; }
+.ai-status { color: var(--faint); font-size: 12px; margin: 0; }
+.ai-hint { color: var(--muted); font-size: 12px; margin: 0 0 6px; }
+.ai-code { display: flex; gap: 8px; align-items: flex-start; }
+.ai-code pre {
+  flex: 1; min-width: 0; margin: 0; padding: 9px 11px; border-radius: 8px;
+  background: var(--panel-2); border: 1px solid var(--border);
+  font: 12px/1.55 var(--mono); white-space: pre-wrap; word-break: break-all;
+}

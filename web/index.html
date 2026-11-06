@@ -32,6 +32,10 @@
     <button type="button" id="cancelBtn" class="btn" hidden>停止</button>
   </form>
   <div class="grow"></div>
+  <button id="aiBtn" class="btn ghost ai-btn" title="把分析结果提供给 Claude 等 AI 助手">
+    <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M8 1.5l1.4 3.6L13 6.5 9.4 7.9 8 11.5 6.6 7.9 3 6.5l3.6-1.4zM12.5 10.5l.7 1.6 1.6.7-1.6.7-.7 1.6-.7-1.6-1.6-.7 1.6-.7z" fill="currentColor"/></svg>
+    AI 接入<span id="aiDot" class="ai-dot" hidden></span>
+  </button>
   <button id="procBtn" class="btn ghost" title="重新读取正在运行的程序及其打开的文件">
     <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9M13.5 2.5v3h-3" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
     刷新运行状态
@@ -89,6 +93,29 @@
 
 <footer class="status" id="status">准备就绪</footer>
 <div id="toast" class="toast" hidden></div>
+
+<dialog id="aiDialog" class="ai-dialog">
+  <div class="ai-head">
+    <h2>让 AI 助手读取分析结果</h2>
+    <button id="aiClose" class="btn ghost small" aria-label="关闭">关闭</button>
+  </div>
+  <p class="ai-lead">DiskMap 提供 <b>MCP</b> 接口（Claude、Cursor 等 AI 助手通用的工具协议）。接入后，AI 可以读取扫描结果、
+    每一项的重要程度和“能不能删”的建议，看到你在这个窗口里正在看和选中的项目，还能在窗口里给你指出它说的文件。
+    所有接口都是只读的，不会删除或修改任何文件。</p>
+  <p id="aiStatus" class="ai-status"></p>
+
+  <h3>Claude Code</h3>
+  <p class="ai-hint">在终端运行一次：</p>
+  <div class="ai-code"><pre id="aiClaudeCode"></pre><button class="btn small" data-copy="aiClaudeCode">复制</button></div>
+
+  <h3>Claude Desktop、Cursor 等其他支持 MCP 的应用</h3>
+  <p class="ai-hint">把下面的内容合并进应用的 MCP 配置文件（Claude Desktop：设置 → 开发者 → 编辑配置）：</p>
+  <div class="ai-code"><pre id="aiJson"></pre><button class="btn small" data-copy="aiJson">复制</button></div>
+
+  <h3>只能运行命令的 AI</h3>
+  <p class="ai-hint">让它运行这条命令，会扫描并输出 Markdown 报告（加 <code>--json</code> 输出 JSON）：</p>
+  <div class="ai-code"><pre id="aiReport"></pre><button class="btn small" data-copy="aiReport">复制</button></div>
+</dialog>
 <script src="/static/app.js"></script>
 </body>
 </html>

@@ -55,6 +55,52 @@ DiskMap 的界面是一个本地网页，按以下顺序选择显示方式：
 - 标题栏上的 **红点** 表示文件夹里有正在使用的文件；斜线方框是合并显示的小项目
 - 扫描过程中画面实时更新，不用等扫描结束
 
+## 让 AI 助手读取分析结果（MCP）
+
+DiskMap 内置 [MCP](https://modelcontextprotocol.io) 服务，Claude Code、Claude Desktop、Cursor 等支持 MCP 的
+AI 助手可以直接调用它。点窗口右上角的 **「AI 接入」**，里面有为你这台电脑生成好的配置，复制即可。例如：
+
+```bash
+claude mcp add --scope user diskmap -- /path/to/DiskMap mcp      # Claude Code
+```
+
+```json
+{ "mcpServers": { "diskmap": { "command": "/path/to/DiskMap", "args": ["mcp"] } } }
+```
+
+macOS 上的路径是 `/Applications/DiskMap.app/Contents/MacOS/DiskMap`；源码运行时用
+`python /path/to/diskmap.py mcp`。
+
+**AI 能看到和做的：**
+
+| 工具 | 作用 |
+|---|---|
+| `diskmap_status` | 是否已有扫描结果、扫描范围与进度、是否连上了你打开的窗口 |
+| `diskmap_scan` | 扫描文件夹或整个磁盘（已有覆盖该路径的结果时直接复用） |
+| `diskmap_summary` | 按重要程度的空间分布、最大的子项、最大的文件、可清理空间、正在使用的大文件 |
+| `diskmap_list` | 列出文件夹的子项，逐层深入 |
+| `diskmap_explain` | 解释一个文件/文件夹：类别和原因、所属软件包、哪些进程在用、能不能删 |
+| `diskmap_cleanup` | 可清理的缓存/临时/日志/回收站，以及可回收的总空间 |
+| `diskmap_largest_files` | 最大的文件，可按类别筛选 |
+| `diskmap_user_view` | 你在窗口里正在看的文件夹和选中的项目（你说“这个”时 AI 就知道指什么） |
+| `diskmap_show` | 让窗口跳转并高亮某个项目，附一句说明（AI 给你指出它说的东西） |
+
+每一项结果都带 `safety` 字段：`danger`（系统核心）、`in_use`（正被使用）、`uninstall_only`（应卸载而非删除）、
+`caution`、`ask_user`（个人文件，由你决定）、`safe_to_clean`（通常可安全清理），以及中文建议。
+
+- **连接你的窗口**：如果你已经打开了 DiskMap，AI 看到的就是窗口里的扫描结果；AI 发起的扫描也会显示在窗口里，
+  右上角「AI 接入」旁的绿点表示最近有 AI 读取过结果。没打开窗口时，MCP 服务会在后台自己扫描。
+- **只读**：所有接口都不会删除或修改文件，清理需要你自己确认后操作。
+- **安全**：窗口把访问地址和随机令牌写在 `~/.cache/diskmap/instance.json`（Windows 为
+  `%LOCALAPPDATA%\DiskMap`，macOS 为 `~/Library/Caches/DiskMap`），权限仅限当前用户，窗口关闭时删除。
+
+**只能运行命令的 AI** 可以用报告模式，扫描后输出 Markdown（或 `--json`）：
+
+```bash
+DiskMap analyze /home --top 20 > report.md
+DiskMap analyze C:\ --json -o report.json      # Windows
+```
+
 ## 从源码运行
 
 需要 Python 3.9+。Linux 上不需要任何第三方包；Windows / macOS 建议装上 `psutil`（识别"正在使用"）和
@@ -101,7 +147,11 @@ glibc，在老发行版上可能无法运行。图标由 `packaging/make_icons.p
 ## 项目结构
 
 ```
-diskmap.py            启动器：本地服务 + 窗口（pywebview / GTK / Chrome 应用模式 / 浏览器）+ 自检
+diskmap.py            启动器：本地服务 + 窗口（pywebview / GTK / Chrome 应用模式 / 浏览器）、
+                      mcp / analyze 子命令、自检
+backend/analysis.py   给 AI 和报告用的分析：概览、列表、解释、可清理候选、安全建议
+backend/mcp_server.py MCP 服务（标准库实现的 JSON-RPC over stdio），连接用户窗口或后台扫描
+backend/instance.py   运行中的窗口登记自己，供 MCP 服务找到
 backend/osinfo.py     平台差异（路径、管理员判断、交换文件、打包环境）
 backend/scanner.py    扫描：os.scandir 遍历，实时向上累加大小
 backend/classify.py   三套重要程度规则（路径规则 + 软件包归属 + 文件名/扩展名）
@@ -111,5 +161,5 @@ backend/mounts.py     挂载点与磁盘列表
 backend/server.py     只监听 127.0.0.1 的 HTTP 接口；随机令牌 + Host 校验
 web/                  界面：Canvas 绘制的 squarified treemap
 packaging/            PyInstaller 配置与图标
-tests/                python -m unittest discover -s tests（三个系统通用）
+tests/                python -m unittest discover -s tests（三个系统通用，含 MCP 协议测试）
 ```

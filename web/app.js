@@ -93,12 +93,22 @@ const OS_TEXT = {
 const osText = () => OS_TEXT[(S.meta && S.meta.os) || 'linux'] || OS_TEXT.linux;
 
 let toastTimer = 0;
-function toast(msg) {
+function toast(msg, ms = 2600, agent = false) {
   const t = $('toast');
   t.textContent = msg;
+  t.classList.toggle('agent', agent);
   t.hidden = false;
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => { t.hidden = true; }, 2600);
+  toastTimer = setTimeout(() => { t.hidden = true; }, ms);
+}
+
+/* ---- 把"用户正在看什么"告诉后台，供 AI 助手读取 ----
+   立即发送（不用定时器防抖：后台窗口里的定时器可能被浏览器大幅推迟），并保证按顺序到达 */
+let uiStateChain = Promise.resolve();
+function reportUiState() {
+  const sel = S.selected && S.selected.t !== 'a' ? S.selected.path : null;
+  const body = { view: S.viewPath, selected: sel, pinned: S.pinned != null ? CLASS_KEYS[S.pinned] : null };
+  uiStateChain = uiStateChain.then(() => api('/api/ui-state', body)).catch(() => {});
 }
 
 /* ================================================================ 配色 */
@@ -573,6 +583,7 @@ function applyTree(data) {
     const u = new URL(location.href);
     u.searchParams.set('view', data.path);
     history.replaceState(null, '', u);
+    reportUiState();
   }
 }
 
@@ -685,6 +696,7 @@ async function select(n) {
   S.selected = n;
   S.selectedPath = n ? n.path : null;
   drawOverlay();
+  reportUiState();
   const box = $('detail');
   if (!n) {
     box.innerHTML = '<p class="muted">点击方框查看详情，双击进入文件夹。</p>';
@@ -772,8 +784,8 @@ function renderDetail(n, info) {
   });
 }
 
-function copyText(s) {
-  const done = () => toast('已复制路径');
+function copyText(s, msg = '已复制路径') {
+  const done = () => toast(msg);
   if (navigator.clipboard && navigator.clipboard.writeText) {
     navigator.clipboard.writeText(s).then(done).catch(() => fallbackCopy(s, done));
   } else fallbackCopy(s, done);
@@ -880,7 +892,21 @@ async function poll() {
   }
   renderStatus();
   updateScanUI();
+  renderAgentBadge();
   const s = S.status;
+  if (s.root && s.state !== 'idle' && document.activeElement !== $('pathInput') && $('pathInput').value !== s.root) {
+    $('pathInput').value = s.root;   // 扫描可能由 AI 助手发起
+  }
+  if (s.root && S.root && s.root !== S.root) {
+    // 扫描范围变了（例如 AI 助手发起了新的扫描）：回到新扫描的根目录
+    S.viewPath = null; S.root = s.root; S.selected = null; S.selectedPath = null;
+    $('pathInput').value = s.root;
+    select(null);
+  }
+  if (s.command && s.command.id > (S.cmdId || 0)) {
+    S.cmdId = s.command.id;
+    runAgentCommand(s.command);
+  }
   if (s.state === 'scanning') {
     $('welcome').hidden = true;
     const now = performance.now();
@@ -897,8 +923,57 @@ async function poll() {
       await loadView(S.viewPath || s.root, { live: true });
       if (S.selected) select(S.selected);
     }
-    schedulePoll(s.ready ? 5000 : 500);
+    schedulePoll(s.ready ? 2000 : 500);
   }
+}
+
+/* ================================================================ AI 助手 */
+async function runAgentCommand(cmd) {
+  if (cmd.action !== 'show' || !cmd.path) return;
+  let info;
+  try {
+    info = await api(`/api/info?path=${encodeURIComponent(cmd.path)}`);
+  } catch (e) { return; }
+  $('welcome').hidden = true;
+  const path = info.path;
+  const isRoot = path === S.root;
+  // 在上级文件夹里显示它，这样能看出它和周围项目的大小对比
+  await loadView(isRoot ? path : parentPath(path));
+  let n = findByPath(path);
+  if ((!n || !(n.w > 4 && n.h > 4)) && info.type === 'dir' && !isRoot) {
+    await loadView(path);   // 在上级里太小看不清：直接进入它
+    n = S.tree;
+  }
+  if (n) {
+    select(n);
+    S.flash = { node: n, t0: performance.now() };
+    drawOverlay();
+  }
+  toast(`AI 助手：${cmd.note || `请看 ${path}`}`, 7000, true);
+}
+
+function renderAgentBadge() {
+  const ago = S.status && S.status.agent_seen_ago;
+  const active = ago != null && ago < 90;
+  $('aiDot').hidden = !active;
+  $('aiBtn').title = active
+    ? `AI 助手 ${Math.round(ago)} 秒前读取了分析结果`
+    : '把分析结果提供给 Claude 等 AI 助手';
+  const st = $('aiStatus');
+  if (st) {
+    st.textContent = ago == null ? '还没有 AI 助手连接过。'
+      : `最近一次 AI 助手访问：${ago < 60 ? `${Math.round(ago)} 秒前` : `${Math.round(ago / 60)} 分钟前`}`;
+  }
+}
+
+function openAgentDialog() {
+  const a = S.meta && S.meta.agent;
+  if (!a) return;
+  $('aiClaudeCode').textContent = a.claude_code;
+  $('aiJson').textContent = a.json;
+  $('aiReport').textContent = a.report;
+  renderAgentBadge();
+  $('aiDialog').showModal();
 }
 
 async function startScan(path) {
@@ -1018,6 +1093,14 @@ function bindEvents() {
     S.pinned = S.pinned === c ? null : c;
     render();
     renderLegendClasses();
+    reportUiState();
+  });
+
+  $('aiBtn').onclick = openAgentDialog;
+  $('aiClose').onclick = () => $('aiDialog').close();
+  $('aiDialog').addEventListener('click', (e) => { if (e.target === $('aiDialog')) $('aiDialog').close(); });
+  document.querySelectorAll('[data-copy]').forEach((b) => {
+    b.onclick = () => copyText($(b.dataset.copy).textContent, '已复制');
   });
 
   document.addEventListener('keydown', (e) => {
@@ -1063,8 +1146,10 @@ async function init() {
   renderLegend();
   renderTop();
   S.status = await api('/api/status');
+  S.cmdId = S.status.command ? S.status.command.id : 0;   // 打开前的旧指令不再执行
   renderStatus();
   updateScanUI();
+  renderAgentBadge();
   if (S.status.state !== 'idle') {
     $('welcome').hidden = true;
     $('pathInput').value = S.status.root;

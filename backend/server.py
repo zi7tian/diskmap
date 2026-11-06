@@ -7,17 +7,20 @@ import hmac
 import json
 import os
 import secrets
+import shlex
 import stat
 import subprocess
+import sys
 import threading
 import time
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from . import __version__
+from . import analysis
 from .classify import CLASSES, RUNNING, Classifier
 from .mounts import disk_mounts, read_mounts
-from .osinfo import (IS_MAC, IS_WIN, OS_NAME, SEP, clean_env, is_admin, join_path,
+from .osinfo import (FROZEN, IS_MAC, IS_WIN, OS_NAME, SEP, clean_env, is_admin, join_path,
                      norm_path, pkey, resource_dir, swapfiles, system_root)
 from .pkgdb import PkgDB
 from .procinfo import ProcInfo
@@ -45,6 +48,11 @@ class App:
         self.admin = is_admin()
         self.last_seen = 0.0   # 最近一次收到界面请求的时间（浏览器模式下用来判断窗口是否已关闭）
         self.bye_at = 0.0      # 页面关闭时发来的告别时间
+        self.version = __version__
+        self.os_name = OS_NAME
+        self.ui_state = None   # 界面上报的"用户正在看什么"
+        self.command = None    # AI 让界面执行的动作（如跳转高亮）
+        self.agent_seen = 0.0  # 最近一次 AI 接口被调用的时间
         threading.Thread(target=self._init, name="diskmap-init", daemon=True).start()
 
     def _init(self):
@@ -67,6 +75,19 @@ class App:
             self.scan.start()
         return self.status()
 
+    def agent_scan(self, path, rescan=False, apparent=False, cross_fs=True):
+        """AI 发起的扫描：已有覆盖该路径、且方式相同的结果时直接复用，避免打断用户。"""
+        path = norm_path(path or system_root())
+        s = self.scan
+        if s is not None and not rescan and s.state in ("scanning", "done") \
+                and s.apparent == apparent and (s.cross_fs or not cross_fs):
+            root = pkey(s.root_path)
+            prefix = root if root.endswith(SEP) else root + SEP
+            if pkey(path) == root or pkey(path).startswith(prefix):
+                if s.find(path)[0] is not None or s.state == "scanning":
+                    return {"reused": True, **self.status()}
+        return {"reused": False, **self.start_scan(path, apparent=apparent, cross_fs=cross_fs)}
+
     def status(self):
         s = self.scan
         base = {
@@ -79,6 +100,8 @@ class App:
             "procs": {"total": self.proc.nprocs, "visible": self.proc.visible,
                       "files": len(self.proc.files), "refreshing": self.proc.refreshing,
                       "error": self.proc.error},
+            "command": self.command,
+            "agent_seen_ago": round(time.time() - self.agent_seen, 1) if self.agent_seen else None,
         }
         if s is None:
             base["state"] = "idle"
@@ -188,6 +211,36 @@ class App:
         subprocess.Popen(["xdg-open", os.path.dirname(path) or "/"], **quiet)
 
 
+def agent_info():
+    """告诉用户如何把 DiskMap 接入 AI 助手（MCP）。"""
+    if FROZEN:
+        base = [sys.executable]
+    else:
+        base = [sys.executable, os.path.join(resource_dir(), "diskmap.py")]
+    cmd = base + ["mcp"]
+    join = subprocess.list2cmdline if IS_WIN else shlex.join
+    return {
+        "command": cmd,
+        "claude_code": "claude mcp add --scope user diskmap -- " + join(cmd),
+        "json": json.dumps({"mcpServers": {"diskmap": {"command": cmd[0], "args": cmd[1:]}}},
+                           ensure_ascii=False, indent=2),
+        "report": join(base + ["analyze", system_root()]),
+    }
+
+
+AGENT_GET = {
+    "/api/agent/status": lambda app, q: analysis.status(app),
+    "/api/agent/summary": lambda app, q: analysis.summary(app, q.get("path"), q.get("top", 10)),
+    "/api/agent/list": lambda app, q: analysis.list_dir(app, q.get("path"), q.get("limit", 50)),
+    "/api/agent/explain": lambda app, q: analysis.explain(app, q.get("path") or ""),
+    "/api/agent/cleanup": lambda app, q: analysis.cleanup(
+        app, q.get("path"), q.get("limit", 30), int(float(q.get("min_mb", 1)) * (1 << 20))),
+    "/api/agent/largest": lambda app, q: analysis.largest_files(
+        app, q.get("path"), q.get("limit", 20), q.get("category") or None),
+    "/api/agent/view": lambda app, q: analysis.user_view(app),
+}
+
+
 def make_handler(app, token, port_ref):
     allowed_hosts = None
 
@@ -247,7 +300,9 @@ def make_handler(app, token, port_ref):
         def do_GET(self):
             url = urllib.parse.urlsplit(self.path)
             q = urllib.parse.parse_qs(url.query)
-            app.last_seen = time.time()
+            is_agent = url.path.startswith("/api/agent/")
+            if not is_agent:
+                app.last_seen = time.time()
             if url.path == "/":
                 if not self._host_ok():
                     return self._err(403, "bad host")
@@ -272,11 +327,17 @@ def make_handler(app, token, port_ref):
             if not self._api_ok():
                 return
             try:
+                if is_agent:
+                    app.agent_seen = time.time()
+                    fn = AGENT_GET.get(url.path)
+                    if fn is None:
+                        return self._err(404, "not found")
+                    return self._send(200, fn(app, {k: v[0] for k, v in q.items()}))
                 if url.path == "/api/meta":
                     return self._send(200, {"classes": CLASSES, "home": os.path.expanduser("~"),
                                             "disks": disk_mounts(), "os": OS_NAME, "sep": SEP,
                                             "system_root": system_root(), "admin": app.admin,
-                                            "version": __version__})
+                                            "version": __version__, "agent": agent_info()})
                 if url.path == "/api/status":
                     return self._send(200, app.status())
                 if url.path == "/api/tree":
@@ -291,6 +352,8 @@ def make_handler(app, token, port_ref):
                     if res is None:
                         return self._err(404, "没有这个路径的扫描结果")
                     return self._send(200, res)
+            except (analysis.AnalysisError, ValueError) as e:
+                return self._err(400, str(e))
             except Exception as e:  # pragma: no cover
                 return self._err(500, repr(e))
             return self._err(404, "not found")
@@ -304,11 +367,25 @@ def make_handler(app, token, port_ref):
                     app.bye_at = time.time()
                     return self._send(204, b"")
                 return self._err(403, "bad token")
-            app.last_seen = time.time()
+            is_agent = url.path.startswith("/api/agent/")
+            if not is_agent:
+                app.last_seen = time.time()
             if not self._api_ok():
                 return
             body = self._body()
             try:
+                if url.path == "/api/agent/scan":
+                    app.agent_seen = time.time()
+                    return self._send(200, app.agent_scan(
+                        body.get("path") or system_root(), rescan=bool(body.get("rescan")),
+                        apparent=bool(body.get("apparent")), cross_fs=not body.get("same_fs")))
+                if url.path == "/api/agent/show":
+                    app.agent_seen = time.time()
+                    return self._send(200, analysis.show(app, str(body.get("path", "")), body.get("note")))
+                if url.path == "/api/ui-state":
+                    app.ui_state = {"view": body.get("view"), "selected": body.get("selected"),
+                                    "pinned": body.get("pinned"), "time": time.time()}
+                    return self._send(200, {"ok": True})
                 if url.path == "/api/scan":
                     return self._send(200, app.start_scan(body.get("path") or system_root(),
                                                           apparent=bool(body.get("apparent")),

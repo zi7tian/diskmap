@@ -58,6 +58,8 @@ def resource_dir():
 
 
 def user_cache_dir():
+    if os.environ.get("DISKMAP_CACHE_DIR"):   # 测试或便携使用时可指定
+        return os.environ["DISKMAP_CACHE_DIR"]
     if IS_WIN:
         base = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~\\AppData\\Local")
         return os.path.join(base, "DiskMap")

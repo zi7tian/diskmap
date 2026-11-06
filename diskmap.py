@@ -7,6 +7,10 @@
     python3 diskmap.py --browser    # 用默认浏览器而不是独立窗口
     sudo python3 diskmap.py --no-open /   # 以 root 扫描全部文件，只输出链接
 
+给 AI 助手 / 脚本用：
+    python3 diskmap.py mcp                # MCP 服务（标准输入输出），供 Claude 等 AI 助手调用
+    python3 diskmap.py analyze / > r.md   # 扫描并输出 Markdown 报告（--json 输出 JSON）
+
 界面窗口按以下顺序尝试，哪个可用就用哪个：
     1. pywebview（Windows 用 Edge WebView2，macOS 用系统 WebKit）
     2. Linux：GTK + WebKit2GTK（源码运行时直接调用；打包版借用系统自带的 Python）
@@ -24,6 +28,25 @@ import time
 import urllib.parse
 import webbrowser
 
+
+def _attach_parent_console():
+    """Windows 的窗口版程序在命令行里运行（analyze、--help）时没有输出通道，接到父控制台上。"""
+    if os.name != "nt" or sys.stdout is not None or len(sys.argv) < 2 or sys.argv[1] == "mcp":
+        return
+    try:
+        import ctypes
+        k32 = ctypes.windll.kernel32
+        if k32.AttachConsole(-1):   # ATTACH_PARENT_PROCESS
+            enc = f"cp{k32.GetConsoleOutputCP()}"
+            sys.stdout = open("CONOUT$", "w", encoding=enc, errors="replace")
+            sys.stderr = open("CONOUT$", "w", encoding=enc, errors="replace")
+            sys.stdout.write("\n")
+    except Exception:
+        pass
+
+
+_attach_parent_console()
+
 # 打包成无控制台的 Windows 程序时 stdout/stderr 为 None。替换成空设备时必须指定 UTF-8，
 # 否则英文版 Windows 默认用 cp1252 编码，一输出中文就抛异常（窗口模式下会弹出错误框卡住）。
 for _name in ("stdout", "stderr"):
@@ -38,9 +61,9 @@ for _name in ("stdout", "stderr"):
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from backend import __version__  # noqa: E402
+from backend import __version__, instance  # noqa: E402
 from backend.osinfo import (FROZEN, IS_LINUX, IS_MAC, IS_WIN, clean_env,  # noqa: E402
-                            clean_environ, is_admin, resource_dir, user_cache_dir)
+                            clean_environ, is_admin, resource_dir, system_root, user_cache_dir)
 from backend.server import serve  # noqa: E402
 
 TITLE = "DiskMap 磁盘地图"
@@ -303,6 +326,11 @@ def selftest(report_path=None, limit=150):
         procs = json.loads(raw)["procs"]
         check("读取运行中的程序", procs["total"] > 0 and not procs["error"], procs)
         check("识别正在使用的文件", procs["files"] > 0, procs["files"])
+
+        st, raw = call("/api/agent/summary?path=" + q)
+        summ = json.loads(raw)
+        check("AI 接口：概览", summ["bytes"] == expected and summ["by_category"], summ.get("size"))
+        _mcp_selftest(tmp, expected, check, step)
     except BaseException as e:
         check("异常", False, repr(e))
     finally:
@@ -312,10 +340,139 @@ def selftest(report_path=None, limit=150):
     finish(0 if ok else 1)
 
 
+def _mcp_selftest(tmp, expected, check, step):
+    """把自己作为 MCP 服务启动，用标准输入输出走一遍：初始化、列工具、扫描、解释文件。"""
+    import queue
+    cmd = [sys.executable] if FROZEN else [sys.executable, os.path.abspath(__file__)]
+    p = subprocess.Popen(cmd + ["mcp", "--no-attach"], stdin=subprocess.PIPE,
+                         stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    lines = queue.Queue()
+
+    def reader():
+        for line in p.stdout:
+            lines.put(line)
+    threading.Thread(target=reader, daemon=True).start()
+
+    def rpc(mid, method, params=None):
+        step[0] = f"MCP {method}"
+        msg = {"jsonrpc": "2.0", "id": mid, "method": method}
+        if params is not None:
+            msg["params"] = params
+        p.stdin.write((json.dumps(msg) + "\n").encode("utf-8"))
+        p.stdin.flush()
+        while True:
+            resp = json.loads(lines.get(timeout=90))
+            if resp.get("id") == mid:
+                return resp
+
+    try:
+        init = rpc(1, "initialize", {"protocolVersion": "2025-06-18", "capabilities": {},
+                                     "clientInfo": {"name": "selftest", "version": "1"}})
+        check("MCP 初始化", init["result"]["serverInfo"]["name"] == "diskmap",
+              init["result"]["protocolVersion"])
+        p.stdin.write(b'{"jsonrpc":"2.0","method":"notifications/initialized"}\n')
+        tools = rpc(2, "tools/list")["result"]["tools"]
+        check("MCP 工具列表", len(tools) >= 9, [t["name"] for t in tools])
+        res = rpc(3, "tools/call", {"name": "diskmap_scan",
+                                    "arguments": {"path": tmp, "wait_seconds": 60, "apparent": True}})["result"]
+        data = res.get("structuredContent") or {}
+        check("MCP 扫描", not res.get("isError") and data.get("summary", {}).get("bytes") == expected,
+              res["content"][0]["text"][:200])
+        res = rpc(4, "tools/call", {"name": "diskmap_explain",
+                                    "arguments": {"path": os.path.join(tmp, "big", "data.bin")}})["result"]
+        check("MCP 解释文件", (res.get("structuredContent") or {}).get("bytes") == 300_000,
+              res["content"][0]["text"][:200])
+        res = rpc(5, "tools/call", {"name": "diskmap_explain", "arguments": {"path": "/no/such/path"}})["result"]
+        check("MCP 错误处理", res.get("isError") is True, res["content"][0]["text"][:120])
+    finally:
+        step[0] = "MCP 退出"
+        try:
+            p.stdin.close()
+            p.wait(timeout=20)
+        except Exception:
+            p.kill()
+    check("MCP 正常退出", p.returncode == 0, p.returncode)
+
+
+# ------------------------------------------------------------------ AI / 脚本接口
+def cmd_mcp(argv):
+    ap = argparse.ArgumentParser(prog="diskmap mcp",
+                                 description="以 MCP 服务方式运行（标准输入输出），供 Claude 等 AI 助手调用。")
+    ap.add_argument("--no-attach", action="store_true",
+                    help="不连接已打开的 DiskMap 窗口，总是在后台独立扫描")
+    args = ap.parse_args(argv)
+    from backend import mcp_server
+    return mcp_server.run(attach=not args.no_attach)
+
+
+def cmd_analyze(argv):
+    ap = argparse.ArgumentParser(prog="diskmap analyze",
+                                 description="扫描并输出分析报告（Markdown 或 JSON），方便 AI 助手或脚本读取。")
+    ap.add_argument("path", nargs="?", help="要分析的文件夹，默认是系统盘")
+    ap.add_argument("--json", action="store_true", help="输出 JSON 而不是 Markdown")
+    ap.add_argument("--top", type=int, default=15, help="每个列表显示几项（默认 15）")
+    ap.add_argument("-o", "--output", help="写入文件而不是标准输出")
+    ap.add_argument("--apparent", action="store_true", help="按文件长度而不是实际占用空间统计")
+    ap.add_argument("--same-fs", action="store_true", help="不进入其他分区")
+    ap.add_argument("-q", "--quiet", action="store_true", help="不显示扫描进度")
+    args = ap.parse_args(argv)
+    from backend import analysis
+    from backend.server import App
+
+    app = App()
+    try:
+        app.start_scan(args.path or system_root(), apparent=args.apparent, cross_fs=not args.same_fs)
+    except ValueError as e:
+        print(e, file=sys.stderr)
+        return 2
+    s = app.scan
+    last = 0.0
+    while s.state == "scanning":
+        time.sleep(0.2)
+        if not args.quiet and time.time() - last > 1:
+            last = time.time()
+            print(f"\r正在扫描 {s.nfiles:,} 个文件，{analysis.human(s.bytes)}…", end="",
+                  file=sys.stderr, flush=True)
+    deadline = time.time() + 20   # 等"正在使用的文件"读取完成
+    while (app.proc.refreshing or app.proc.time == 0) and time.time() < deadline:
+        time.sleep(0.1)
+    if not args.quiet:
+        print(f"\r扫描完成：{s.nfiles:,} 个文件，用时 {time.time() - s.started:.1f} 秒" + " " * 20,
+              file=sys.stderr, flush=True)
+    if s.state == "error":
+        print(f"扫描出错：{s.error}", file=sys.stderr)
+        return 1
+    if args.json:
+        text = json.dumps(analysis.report_json(app, s.root_path, args.top), ensure_ascii=False, indent=2) + "\n"
+    else:
+        text = analysis.report_markdown(app, s.root_path, args.top)
+    if args.output:
+        with open(args.output, "w", encoding="utf-8") as f:
+            f.write(text)
+        if not args.quiet:
+            print(f"报告已写入 {args.output}", file=sys.stderr)
+    else:
+        try:
+            sys.stdout.reconfigure(encoding="utf-8")   # 输出被重定向到文件时统一用 UTF-8
+        except (AttributeError, ValueError):
+            pass
+        sys.stdout.write(text)
+        sys.stdout.flush()
+    return 0
+
+
 # ------------------------------------------------------------------ 入口
 def main():
     global VERBOSE
-    ap = argparse.ArgumentParser(description="DiskMap 磁盘地图：可视化磁盘占用并标注文件重要程度")
+    if len(sys.argv) > 1 and sys.argv[1] == "mcp":
+        sys.exit(cmd_mcp(sys.argv[2:]))
+    if len(sys.argv) > 1 and sys.argv[1] == "analyze":
+        code = cmd_analyze(sys.argv[2:])
+        sys.stdout.flush()
+        os._exit(code)
+    ap = argparse.ArgumentParser(
+        description="DiskMap 磁盘地图：可视化磁盘占用并标注文件重要程度",
+        epilog="AI 助手 / 脚本接口：  diskmap mcp   （MCP 服务）    diskmap analyze [路径] [--json]   （分析报告）")
     ap.add_argument("path", nargs="?", help="启动后立即扫描的文件夹（例如 / 、/home 或 D:\\）")
     ap.add_argument("--port", type=int, default=int(os.environ.get("DISKMAP_PORT", 0)),
                     help="本地端口（默认自动选择）")
@@ -342,6 +499,19 @@ def main():
         app.start_scan(args.path, apparent=args.apparent, cross_fs=not args.same_fs)
         url += "&" + urllib.parse.urlencode({"view": app.scan.root_path})
 
+    def _terminate(*_a):   # 被 kill / 注销时也走正常退出流程，删除登记文件
+        raise KeyboardInterrupt
+    try:
+        import signal
+        signal.signal(signal.SIGTERM, _terminate)
+    except (ValueError, OSError, AttributeError):
+        pass
+    # 登记本窗口，让同一用户的 AI 接口（diskmap mcp）能读取这里的扫描结果
+    try:
+        token = urllib.parse.parse_qs(urllib.parse.urlsplit(url).query)["t"][0]
+        instance.write(httpd.server_address[1], token, __version__)
+    except (OSError, KeyError):
+        pass
     print(f"DiskMap 已启动：{url}", flush=True)
     if not IS_WIN and is_admin() and not args.no_open:
         print("以 root 运行：为安全起见不自动打开窗口，请在普通用户的浏览器中打开上面的链接。", flush=True)
@@ -356,6 +526,7 @@ def main():
     except KeyboardInterrupt:
         pass
     finally:
+        instance.remove()
         if app.scan:
             app.scan.cancel()
         httpd.shutdown()
