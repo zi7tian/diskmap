@@ -17,8 +17,9 @@ import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from . import __version__
-from . import analysis
+from . import analysis, i18n
 from .classify import CLASSES, RUNNING, Classifier
+from .i18n import L
 from .mounts import disk_mounts, read_mounts
 from .osinfo import (FROZEN, IS_MAC, IS_WIN, OS_NAME, SEP, clean_env, is_admin, join_path,
                      norm_path, pkey, resource_dir, swapfiles, system_root)
@@ -65,7 +66,7 @@ class App:
     def start_scan(self, path, apparent=False, cross_fs=True):
         path = norm_path(path or system_root())
         if not os.path.isdir(path):
-            raise ValueError(f"文件夹不存在：{path}")
+            raise ValueError(L(f"文件夹不存在：{path}", f"Folder does not exist: {path}"))
         self.ready.wait()
         with self.lock:
             if self.scan is not None:
@@ -175,13 +176,15 @@ class App:
     def reveal(self, path):
         """在文件管理器中显示。"""
         if self.admin and not IS_WIN:
-            raise ValueError("以 root 身份运行时不打开文件管理器，以免以 root 权限启动图形程序")
+            raise ValueError(L("以 root 身份运行时不打开文件管理器，以免以 root 权限启动图形程序",
+                               "Running as root: the file manager is not opened, to avoid starting "
+                               "a graphical program with root rights"))
         s = self.scan
         if s is None or s.find(path)[0] is None:
-            raise ValueError("只能打开扫描结果中的路径")
+            raise ValueError(L("只能打开扫描结果中的路径", "Only paths in the scan results can be opened"))
         path = norm_path(path)
         if not os.path.lexists(path):
-            raise ValueError("该文件已不存在")
+            raise ValueError(L("该文件已不存在", "This file no longer exists"))
         is_dir = os.path.isdir(path) and not os.path.islink(path)
         if IS_WIN:
             if is_dir:
@@ -261,7 +264,7 @@ def make_handler(app, token, port_ref):
 
         def _send(self, code, body, ctype="application/json; charset=utf-8", extra=None):
             if isinstance(body, (dict, list)) or body is None:
-                body = json.dumps(body, ensure_ascii=False, separators=(",", ":")).encode()
+                body = json.dumps(i18n.loc(body), ensure_ascii=False, separators=(",", ":")).encode()
             elif isinstance(body, str):
                 body = body.encode()
             self.send_response(code)
@@ -296,8 +299,20 @@ def make_handler(app, token, port_ref):
             except ValueError:
                 return {}
 
+        def _lang(self):
+            """AI 接口可以用请求头指定输出语言；界面请求用全局设置。"""
+            return self.headers.get("X-DiskMap-Lang")
+
         # --------------------------------------------------- 路由
         def do_GET(self):
+            with i18n.use(self._lang()):
+                self._get()
+
+        def do_POST(self):
+            with i18n.use(self._lang()):
+                self._post()
+
+        def _get(self):
             url = urllib.parse.urlsplit(self.path)
             q = urllib.parse.parse_qs(url.query)
             is_agent = url.path.startswith("/api/agent/")
@@ -308,10 +323,15 @@ def make_handler(app, token, port_ref):
                     return self._err(403, "bad host")
                 if not hmac.compare_digest(q.get("t", [""])[0], token):
                     return self._send(403, "<meta charset=utf-8><p style='font:16px sans-serif;padding:2em'>"
-                                      "请使用 DiskMap 启动时输出的完整链接打开（链接里包含访问令牌）。</p>",
+                                      "请使用 DiskMap 启动时输出的完整链接打开（链接里包含访问令牌）。<br>"
+                                      "Please open the full link printed when DiskMap started "
+                                      "(it contains the access token).</p>",
                                       "text/html; charset=utf-8")
                 with open(os.path.join(WEB_DIR, "index.html"), encoding="utf-8") as f:
-                    html = f.read().replace("__DISKMAP_TOKEN__", token)
+                    lang = i18n.current()
+                    html = (f.read().replace("__DISKMAP_TOKEN__", token)
+                            .replace("__DISKMAP_LANG__", lang)
+                            .replace('<html lang="zh-CN">', f'<html lang="{"en" if lang == "en" else "zh-CN"}" data-lang="{lang}">'))
                 return self._send(200, html, "text/html; charset=utf-8",
                                   {"Referrer-Policy": "no-referrer"})
             if url.path.startswith("/static/"):
@@ -337,7 +357,8 @@ def make_handler(app, token, port_ref):
                     return self._send(200, {"classes": CLASSES, "home": os.path.expanduser("~"),
                                             "disks": disk_mounts(), "os": OS_NAME, "sep": SEP,
                                             "system_root": system_root(), "admin": app.admin,
-                                            "version": __version__, "agent": agent_info()})
+                                            "version": __version__, "agent": agent_info(),
+                                            "lang": i18n.current()})
                 if url.path == "/api/status":
                     return self._send(200, app.status())
                 if url.path == "/api/tree":
@@ -345,12 +366,12 @@ def make_handler(app, token, port_ref):
                     frac = min(max(frac, 1e-6), 0.05)
                     res = app.tree(q.get("path", [""])[0], frac)
                     if res is None:
-                        return self._err(404, "没有这个路径的扫描结果")
+                        return self._err(404, L("没有这个路径的扫描结果", "No scan results for this path"))
                     return self._send(200, res)
                 if url.path == "/api/info":
                     res = app.info(q.get("path", [""])[0])
                     if res is None:
-                        return self._err(404, "没有这个路径的扫描结果")
+                        return self._err(404, L("没有这个路径的扫描结果", "No scan results for this path"))
                     return self._send(200, res)
             except (analysis.AnalysisError, ValueError) as e:
                 return self._err(400, str(e))
@@ -358,7 +379,7 @@ def make_handler(app, token, port_ref):
                 return self._err(500, repr(e))
             return self._err(404, "not found")
 
-        def do_POST(self):
+        def _post(self):
             url = urllib.parse.urlsplit(self.path)
             if url.path == "/api/bye":
                 # 页面关闭时用 sendBeacon 发来（不能带自定义请求头，令牌放在查询参数里）
@@ -382,6 +403,10 @@ def make_handler(app, token, port_ref):
                 if url.path == "/api/agent/show":
                     app.agent_seen = time.time()
                     return self._send(200, analysis.show(app, str(body.get("path", "")), body.get("note")))
+                if url.path == "/api/settings":
+                    if "lang" in body:
+                        i18n.save_lang(body.get("lang"))
+                    return self._send(200, {"lang": i18n.current()})
                 if url.path == "/api/ui-state":
                     app.ui_state = {"view": body.get("view"), "selected": body.get("selected"),
                                     "pinned": body.get("pinned"), "time": time.time()}

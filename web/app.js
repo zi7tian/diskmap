@@ -17,6 +17,35 @@ const S = {
   fetchSeq: 0, lastLive: 0, liveBusy: false, pollTimer: 0, wasScanning: false,
 };
 
+/* ---- 界面语言：L(中文, English)；静态文字见 index.html 的 data-en / data-only ---- */
+let LANG = window.DISKMAP_LANG === 'en' ? 'en' : 'zh';
+const L = (zh, en) => (LANG === 'en' ? en : zh);
+const pl = (n, one, many) => (n === 1 ? one : (many || `${one}s`));
+const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
+const ORIG = new WeakMap();
+function orig(el) {
+  let o = ORIG.get(el);
+  if (!o) {
+    o = { text: el.textContent, title: el.getAttribute('title'), aria: el.getAttribute('aria-label') };
+    ORIG.set(el, o);
+  }
+  return o;
+}
+function applyStaticLang() {
+  const root = document.documentElement;
+  root.dataset.lang = LANG;
+  root.lang = LANG === 'en' ? 'en' : 'zh-CN';
+  document.title = L('DiskMap 磁盘地图', 'DiskMap');
+  const en = LANG === 'en';
+  // 先记下中文原文（第一次调用时页面上还是中文），再替换
+  document.querySelectorAll('[data-en], [data-en-title], [data-en-aria-label]').forEach(orig);
+  document.querySelectorAll('[data-en]').forEach((el) => { el.textContent = en ? el.dataset.en : orig(el).text; });
+  document.querySelectorAll('[data-en-title]').forEach((el) => { el.title = en ? el.dataset.enTitle : orig(el).title; });
+  document.querySelectorAll('[data-en-aria-label]').forEach((el) => {
+    el.setAttribute('aria-label', en ? el.dataset.enAriaLabel : orig(el).aria);
+  });
+}
+
 const map = $('map'), overlay = $('overlay');
 const ctx = map.getContext('2d', { alpha: false });
 const octx = overlay.getContext('2d');
@@ -31,7 +60,7 @@ async function api(path, body) {
   }
   const r = await fetch(path, opts);
   const data = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(data.error || `请求失败（${r.status}）`);
+  if (!r.ok) throw new Error(data.error || L(`请求失败（${r.status}）`, `Request failed (${r.status})`));
   return data;
 }
 
@@ -43,7 +72,7 @@ function fmtBytes(n) {
   do { n /= 1024; i++; } while (n >= 1024 && i < u.length - 1);
   return `${n >= 100 ? n.toFixed(0) : n >= 10 ? n.toFixed(1) : n.toFixed(2)} ${u[i]}`;
 }
-const fmtInt = (n) => (n || 0).toLocaleString('zh-CN');
+const fmtInt = (n) => (n || 0).toLocaleString(LANG === 'en' ? 'en-US' : 'zh-CN');
 function pct(a, b) {
   if (!b) return '0%';
   const p = (a / b) * 100;
@@ -75,22 +104,32 @@ function childToward(anc, desc) {
 /* ---- 各系统不同的提示文字 ---- */
 const OS_TEXT = {
   linux: {
-    elevate: '用 sudo 运行可扫描全部',
-    hint: '普通用户无法读取部分系统文件夹，用 <code>sudo</code> 运行可扫描全部内容。',
-    system: '系统文件：请通过包管理器卸载对应软件，而不是直接删除。',
+    elevate: ['用 sudo 运行可扫描全部', 'run with sudo to scan everything'],
+    hint: ['普通用户无法读取部分系统文件夹，用 <code>sudo</code> 运行可扫描全部内容。',
+      'Some system folders are not readable as a normal user; run with <code>sudo</code> to scan everything.'],
+    system: ['系统文件：请通过包管理器卸载对应软件，而不是直接删除。',
+      'System files: uninstall the software with the package manager instead of deleting files.'],
   },
   macos: {
-    elevate: '在「隐私与安全性 → 完全磁盘访问权限」中允许 DiskMap 可扫描更多',
-    hint: '部分文件夹受 macOS 隐私保护。在「系统设置 → 隐私与安全性 → 完全磁盘访问权限」中添加 DiskMap 后可以扫描更多内容。',
-    system: '系统或应用程序文件：卸载应用请把它从「应用程序」拖到废纸篓；系统文件不要改动。',
+    elevate: ['在「隐私与安全性 → 完全磁盘访问权限」中允许 DiskMap 可扫描更多',
+      'allow DiskMap under Privacy & Security → Full Disk Access to scan more'],
+    hint: ['部分文件夹受 macOS 隐私保护。在「系统设置 → 隐私与安全性 → 完全磁盘访问权限」中添加 DiskMap 后可以扫描更多内容。',
+      'Some folders are protected by macOS privacy settings. Add DiskMap under System Settings → Privacy & Security → Full Disk Access to scan more.'],
+    system: ['系统或应用程序文件：卸载应用请把它从「应用程序」拖到废纸篓；系统文件不要改动。',
+      'System or application files: to uninstall an app, drag it from Applications to the Trash; leave system files alone.'],
   },
   windows: {
-    elevate: '右键「以管理员身份运行」可扫描全部',
-    hint: '部分系统文件夹需要管理员权限才能读取。右键 DiskMap 选择「以管理员身份运行」可扫描全部内容。',
-    system: '系统或程序文件：请在「设置 → 应用 → 已安装的应用」中卸载对应程序，而不是直接删除。',
+    elevate: ['右键「以管理员身份运行」可扫描全部', 'right-click → Run as administrator to scan everything'],
+    hint: ['部分系统文件夹需要管理员权限才能读取。右键 DiskMap 选择「以管理员身份运行」可扫描全部内容。',
+      'Some system folders need administrator rights. Right-click DiskMap and choose Run as administrator to scan everything.'],
+    system: ['系统或程序文件：请在「设置 → 应用 → 已安装的应用」中卸载对应程序，而不是直接删除。',
+      'System or program files: uninstall the program in Settings → Apps → Installed apps instead of deleting files.'],
   },
 };
-const osText = () => OS_TEXT[(S.meta && S.meta.os) || 'linux'] || OS_TEXT.linux;
+function osText() {
+  const t = OS_TEXT[(S.meta && S.meta.os) || 'linux'] || OS_TEXT.linux;
+  return Object.fromEntries(Object.entries(t).map(([k, v]) => [k, L(v[0], v[1])]));
+}
 
 let toastTimer = 0;
 function toast(msg, ms = 2600, agent = false) {
@@ -405,7 +444,7 @@ function render() {
       if (w >= 70 && h >= 16 && on) {
         ctx.fillStyle = P.dirText;
         ctx.font = fSize;
-        ctx.fillText(fit(`${fmtInt(n.k)} 个小项目`, fSize, w - 9), x + 4, y + Math.min(h / 2, 10));
+        ctx.fillText(fit(L(`${fmtInt(n.k)} 个小项目`, `${fmtInt(n.k)} small items`), fSize, w - 9), x + 4, y + Math.min(h / 2, 10));
       }
     }
   }
@@ -537,7 +576,7 @@ async function loadView(path, opts = {}) {
   const req = api(`/api/tree?path=${encodeURIComponent(path)}&frac=${frac}`);
   if (!opts.live) {
     clearTimeout(busyTimer);
-    busyTimer = setTimeout(() => { $('busy').textContent = '正在加载…'; $('busy').hidden = false; }, 350);
+    busyTimer = setTimeout(() => { $('busy').textContent = L('正在加载…', 'Loading…'); $('busy').hidden = false; }, 350);
   }
   const anim = opts.zoomFrom ? zoomInAnim(opts.zoomFrom) : null;
   let data;
@@ -628,7 +667,8 @@ function renderCrumbs() {
   $('upBtn').disabled = S.viewPath === S.root;
   const t = S.tree;
   $('viewSize').innerHTML = t
-    ? `<b>${fmtBytes(t.s)}</b> · ${fmtInt(t.nf)} 个文件 · ${fmtInt(t.nd)} 个文件夹`
+    ? L(`<b>${fmtBytes(t.s)}</b> · ${fmtInt(t.nf)} 个文件 · ${fmtInt(t.nd)} 个文件夹`,
+      `<b>${fmtBytes(t.s)}</b> · ${fmtInt(t.nf)} ${pl(t.nf, 'file')} · ${fmtInt(t.nd)} ${pl(t.nd, 'folder')}`)
     : '';
 }
 
@@ -662,7 +702,7 @@ function renderTop() {
   const top = files.slice(0, 10);
   const ol = $('topFiles');
   if (!top.length) {
-    ol.innerHTML = '<li class="empty">暂无</li>';
+    ol.innerHTML = `<li class="empty">${L('暂无', 'None')}</li>`;
     return;
   }
   ol.innerHTML = top.map((f, i) => `<li data-i="${i}" title="${esc(f.path)}">
@@ -677,20 +717,23 @@ function renderTop() {
 function clsLabel(id) { return S.meta ? S.meta.classes[id].label : ''; }
 
 const WARN = {
-  0: '系统核心文件：删除或修改可能导致系统无法启动。',
-  1: '正被程序使用：如需删除，请先关闭相关程序。',
+  0: ['系统核心文件：删除或修改可能导致系统无法启动。', 'System core file: deleting or changing it can stop the system from booting.'],
+  1: ['正被程序使用：如需删除，请先关闭相关程序。', 'In use by a program: close that program before deleting it.'],
   2: null,   // 见 OS_TEXT.system
-  3: '配置文件：删除会丢失相应程序的设置。',
-  5: '缓存/临时文件：一般可以清理，程序会按需重新生成。',
+  3: ['配置文件：删除会丢失相应程序的设置。', 'Settings file: deleting it loses that program\'s settings.'],
+  5: ['缓存/临时文件：一般可以清理，程序会按需重新生成。', 'Cache / temporary file: usually safe to clean; programs recreate it when needed.'],
 };
-const warnText = (c) => (c === 2 ? osText().system : WARN[c] || '');
+const warnText = (c) => (c === 2 ? osText().system : WARN[c] ? L(WARN[c][0], WARN[c][1]) : '');
 
 function uninstallHint(pkg) {
   const m = S.status && S.status.pkg && S.status.pkg.manager;
   if (!pkg || !['pacman', 'dpkg', 'rpm'].includes(m)) return '';
   const cmd = m === 'pacman' ? `sudo pacman -Rs ${pkg}` : m === 'dpkg' ? `sudo apt remove ${pkg}` : `sudo dnf remove ${pkg}`;
-  return `<br>卸载命令：<code>${esc(cmd)}</code>`;
+  return `<br>${L('卸载命令：', 'Uninstall command: ')}<code>${esc(cmd)}</code>`;
 }
+
+const detailPlaceholder = () => `<p class="muted">${L('点击方框查看详情，双击进入文件夹。',
+  'Click a box to see details; double-click to open a folder.')}</p>`;
 
 async function select(n) {
   S.selected = n;
@@ -699,15 +742,16 @@ async function select(n) {
   reportUiState();
   const box = $('detail');
   if (!n) {
-    box.innerHTML = '<p class="muted">点击方框查看详情，双击进入文件夹。</p>';
+    box.innerHTML = detailPlaceholder();
     return;
   }
   if (n.t === 'a') {
-    box.innerHTML = `<div class="d-name">${fmtInt(n.k)} 个较小的项目</div>
+    box.innerHTML = `<div class="d-name">${L(`${fmtInt(n.k)} 个较小的项目`, `${fmtInt(n.k)} smaller items`)}</div>
       <div class="d-path">${esc(n.parent ? n.parent.path : '')}</div>
-      <dl><dt>合计大小</dt><dd>${fmtBytes(n.s)}</dd><dt>主要类别</dt><dd>${esc(clsLabel(n.c))}</dd></dl>
-      <p class="why">这些项目太小，在当前缩放下合并成一个方框显示。进入所在文件夹即可看到它们。</p>
-      ${n.parent && n.parent !== S.tree ? '<div class="actions"><button class="btn small" id="aEnter">进入所在文件夹</button></div>' : ''}`;
+      <dl><dt>${L('合计大小', 'Total size')}</dt><dd>${fmtBytes(n.s)}</dd><dt>${L('主要类别', 'Main category')}</dt><dd>${esc(clsLabel(n.c))}</dd></dl>
+      <p class="why">${L('这些项目太小，在当前缩放下合并成一个方框显示。进入所在文件夹即可看到它们。',
+        'These items are too small to show at this size, so they are drawn as one box. Open their folder to see them.')}</p>
+      ${n.parent && n.parent !== S.tree ? `<div class="actions"><button class="btn small" id="aEnter">${L('进入所在文件夹', 'Open folder')}</button></div>` : ''}`;
     const b = $('aEnter');
     if (b) b.onclick = () => enter(n.parent);
     return;
@@ -725,15 +769,23 @@ function renderDetail(n, info) {
   const isDir = n.t === 'd';
   const parentSize = n.parent ? n.parent.s : n.s;
   const rows = [];
-  rows.push(['大小', `${fmtBytes(n.s)}${info && info.apparent != null && Math.abs(info.apparent - n.s) > 4096 ? `（文件长度 ${fmtBytes(info.apparent)}）` : ''}`]);
-  if (n.parent) rows.push(['占上级', pct(n.s, parentSize)]);
-  if (S.tree && n !== S.tree) rows.push(['占当前视图', pct(n.s, S.tree.s)]);
-  if (isDir) rows.push(['包含', `${fmtInt(n.nf)} 个文件，${fmtInt(n.nd)} 个文件夹`]);
-  if (info && info.mtime) rows.push(['修改时间', info.mtime]);
-  if (info && info.mode) rows.push(['权限', info.owner ? `${info.mode} ${esc(info.owner)}:${esc(info.group)}` : info.mode]);
+  const flen = info && info.apparent != null && Math.abs(info.apparent - n.s) > 4096
+    ? L(`（文件长度 ${fmtBytes(info.apparent)}）`, ` (file length ${fmtBytes(info.apparent)})`) : '';
+  rows.push([L('大小', 'Size'), `${fmtBytes(n.s)}${flen}`]);
+  if (n.parent) rows.push([L('占上级', 'Share of parent'), pct(n.s, parentSize)]);
+  if (S.tree && n !== S.tree) rows.push([L('占当前视图', 'Share of view'), pct(n.s, S.tree.s)]);
+  if (isDir) {
+    rows.push([L('包含', 'Contains'), L(`${fmtInt(n.nf)} 个文件，${fmtInt(n.nd)} 个文件夹`,
+      `${fmtInt(n.nf)} ${pl(n.nf, 'file')}, ${fmtInt(n.nd)} ${pl(n.nd, 'folder')}`)]);
+  }
+  if (info && info.mtime) rows.push([L('修改时间', 'Modified'), info.mtime]);
+  if (info && info.mode) rows.push([L('权限', 'Permissions'), info.owner ? `${info.mode} ${esc(info.owner)}:${esc(info.group)}` : info.mode]);
   const pkg = (info && info.pkg) || n.pk;
-  if (pkg) rows.push(['软件包', esc(pkg)]);
-  if (info && info.mount) rows.push(['分区', `${esc(info.mount.source)}（${esc(info.mount.fstype)}）`]);
+  if (pkg) rows.push([L('软件包', 'Package'), esc(pkg)]);
+  if (info && info.mount) {
+    rows.push([L('分区', 'Partition'), L(`${esc(info.mount.source)}（${esc(info.mount.fstype)}）`,
+      `${esc(info.mount.source)} (${esc(info.mount.fstype)})`)]);
+  }
 
   let badges = `<span class="badge" style="color:${clsVar(c)}"><span class="dot" style="background:${clsVar(c)}"></span>${esc(clsLabel(c))}</span>`;
   const sc = info ? info.static_cls : n.sc;
@@ -744,18 +796,24 @@ function renderDetail(n, info) {
   let procs = '';
   if (info && info.procs && info.procs.length) {
     procs = `<div class="procs">${info.procs.map((p) => `<div><span>${esc(p.comm)} <span class="pk">PID ${p.pid || '—'}</span></span><span class="pk">${esc(p.kind)}</span></div>`).join('')}
-      ${info.nprocs > info.procs.length ? `<div class="pk">…共 ${info.nprocs} 个进程</div>` : ''}</div>`;
+      ${info.nprocs > info.procs.length ? `<div class="pk">${L(`…共 ${info.nprocs} 个进程`, `…${info.nprocs} processes in total`)}</div>` : ''}</div>`;
   } else if (!info && n.p) {
     procs = `<div class="procs"><div>${esc(n.p)}</div></div>`;
   }
   let running = '';
   const rc = info ? info.running : n.r;
-  if (isDir && rc) running = `<p class="why" style="color:${clsVar(RUNNING)}">● 其中有 ${fmtInt(rc)} 个文件正被运行中的程序使用</p>`;
+  if (isDir && rc) {
+    running = `<p class="why" style="color:${clsVar(RUNNING)}">● ${L(`其中有 ${fmtInt(rc)} 个文件正被运行中的程序使用`,
+      `${fmtInt(rc)} ${pl(rc, 'file')} inside ${rc === 1 ? 'is' : 'are'} in use by running programs`)}</p>`;
+  }
 
   const warnCls = c === RUNNING ? RUNNING : (sc != null ? sc : c);
   let warn = warnText(c) || warnText(warnCls);
   if (warn && (c === 2 || sc === 2) && pkg && !isDir) warn += uninstallHint(pkg);
-  if (info && info.denied) warn = `没有权限读取此文件夹的内容，大小未计入。${osText().elevate}。`;
+  if (info && info.denied) {
+    warn = L(`没有权限读取此文件夹的内容，大小未计入。${osText().elevate}。`,
+      `No permission to read this folder; its size is not counted. ${cap(osText().elevate)}.`);
+  }
   const warnHtml = warn
     ? `<div class="warn" style="background:color-mix(in srgb, ${clsVar(warnCls)} 14%, transparent);border-left:3px solid ${clsVar(warnCls)}">${warn}</div>`
     : '';
@@ -768,24 +826,24 @@ function renderDetail(n, info) {
     ${info && info.reason ? `<p class="why">${esc(info.reason)}</p>` : '<p class="why">&nbsp;</p>'}
     <dl>${rows.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('')}</dl>
     ${running}${procs}${warnHtml}
-    ${info && info.gone ? '<p class="why">⚠ 该项目在扫描后已被删除或移动。</p>' : ''}
+    ${info && info.gone ? `<p class="why">⚠ ${L('该项目在扫描后已被删除或移动。', 'This item was deleted or moved after the scan.')}</p>` : ''}
     <div class="actions">
-      ${canEnter ? '<button class="btn small" data-act="enter">进入</button>' : ''}
-      <button class="btn small" data-act="reveal">在文件管理器中显示</button>
-      <button class="btn small" data-act="copy">复制路径</button>
+      ${canEnter ? `<button class="btn small" data-act="enter">${L('进入', 'Open')}</button>` : ''}
+      <button class="btn small" data-act="reveal">${L('在文件管理器中显示', 'Show in file manager')}</button>
+      <button class="btn small" data-act="copy">${L('复制路径', 'Copy path')}</button>
     </div>`;
   $('detail').querySelectorAll('[data-act]').forEach((b) => {
     b.onclick = () => {
       const act = b.dataset.act;
       if (act === 'enter') enter(n);
-      else if (act === 'reveal') api('/api/reveal', { path: n.path }).then(() => toast('已在文件管理器中打开')).catch((e) => toast(e.message));
+      else if (act === 'reveal') api('/api/reveal', { path: n.path }).then(() => toast(L('已在文件管理器中打开', 'Opened in the file manager'))).catch((e) => toast(e.message));
       else if (act === 'copy') copyText(n.path);
     };
   });
 }
 
-function copyText(s, msg = '已复制路径') {
-  const done = () => toast(msg);
+function copyText(s, msg) {
+  const done = () => toast(msg || L('已复制路径', 'Path copied'));
   if (navigator.clipboard && navigator.clipboard.writeText) {
     navigator.clipboard.writeText(s).then(done).catch(() => fallbackCopy(s, done));
   } else fallbackCopy(s, done);
@@ -797,7 +855,7 @@ function fallbackCopy(s, done) {
   ta.style.opacity = '0';
   document.body.appendChild(ta);
   ta.select();
-  try { document.execCommand('copy'); done(); } catch (e) { toast('复制失败'); }
+  try { document.execCommand('copy'); done(); } catch (e) { toast(L('复制失败', 'Copy failed')); }
   ta.remove();
 }
 
@@ -809,24 +867,25 @@ function showTooltip(n, cx, cy) {
   const lines = [];
   let name, path;
   if (n.t === 'a') {
-    name = `${fmtInt(n.k)} 个较小的项目`;
-    path = `位于 ${n.parent ? n.parent.path : ''}`;
+    name = L(`${fmtInt(n.k)} 个较小的项目`, `${fmtInt(n.k)} smaller items`);
+    path = L(`位于 ${n.parent ? n.parent.path : ''}`, `in ${n.parent ? n.parent.path : ''}`);
   } else {
     name = n.depth === 0 && n.path === S.root ? n.path : n.n;
     path = n.path;
   }
   lines.push(`<div class="t-row"><span class="t-size"><b>${fmtBytes(n.s)}</b></span>
-    ${n.parent ? `<span class="k">· 占上级 ${pct(n.s, parentSize)}</span>` : ''}
-    ${S.tree && n !== S.tree && n.parent !== S.tree ? `<span class="k">· 占视图 ${pct(n.s, S.tree.s)}</span>` : ''}</div>`);
+    ${n.parent ? `<span class="k">· ${L(`占上级 ${pct(n.s, parentSize)}`, `${pct(n.s, parentSize)} of parent`)}</span>` : ''}
+    ${S.tree && n !== S.tree && n.parent !== S.tree ? `<span class="k">· ${L(`占视图 ${pct(n.s, S.tree.s)}`, `${pct(n.s, S.tree.s)} of view`)}</span>` : ''}</div>`);
   let tag = `<span class="tag" style="color:${clsVar(n.c)}"><span class="dot" style="background:${clsVar(n.c)}"></span>${esc(clsLabel(n.c))}</span>`;
-  if (n.c === RUNNING && n.sc != null) tag += `<span class="k">· 本身属于${esc(clsLabel(n.sc))}</span>`;
+  if (n.c === RUNNING && n.sc != null) tag += `<span class="k">· ${L(`本身属于${esc(clsLabel(n.sc))}`, `otherwise ${esc(clsLabel(n.sc))}`)}</span>`;
   lines.push(`<div class="t-row">${tag}</div>`);
-  if (n.p) lines.push(`<div class="t-row"><span class="k">使用者</span><span>${esc(n.p)}</span></div>`);
-  if (n.pk) lines.push(`<div class="t-row"><span class="k">软件包</span><span>${esc(n.pk)}</span></div>`);
+  if (n.p) lines.push(`<div class="t-row"><span class="k">${L('使用者', 'Used by')}</span><span>${esc(n.p)}</span></div>`);
+  if (n.pk) lines.push(`<div class="t-row"><span class="k">${L('软件包', 'Package')}</span><span>${esc(n.pk)}</span></div>`);
   if (n.t === 'd') {
-    lines.push(`<div class="t-row"><span class="k">包含</span><span>${fmtInt(n.nf)} 个文件 · ${fmtInt(n.nd)} 个文件夹</span></div>`);
-    if (n.r) lines.push(`<div class="t-row" style="color:${clsVar(RUNNING)}">● ${fmtInt(n.r)} 个文件正在被使用</div>`);
-    if (n.fl & 2) lines.push('<div class="t-row"><span class="k">独立分区的挂载点</span></div>');
+    lines.push(`<div class="t-row"><span class="k">${L('包含', 'Contains')}</span><span>${L(`${fmtInt(n.nf)} 个文件 · ${fmtInt(n.nd)} 个文件夹`,
+      `${fmtInt(n.nf)} ${pl(n.nf, 'file')} · ${fmtInt(n.nd)} ${pl(n.nd, 'folder')}`)}</span></div>`);
+    if (n.r) lines.push(`<div class="t-row" style="color:${clsVar(RUNNING)}">● ${L(`${fmtInt(n.r)} 个文件正在被使用`, `${fmtInt(n.r)} ${pl(n.r, 'file')} in use`)}</div>`);
+    if (n.fl & 2) lines.push(`<div class="t-row"><span class="k">${L('独立分区的挂载点', 'Mount point of another partition')}</span></div>`);
   }
   tip.innerHTML = `<div class="t-name">${esc(name)}</div><div class="t-path">${esc(path)}</div>${lines.join('')}`;
   tip.hidden = false;
@@ -847,26 +906,40 @@ function renderStatus() {
   if (!s) return;
   const sep = '<span class="sep">·</span>';
   const bits = [];
-  if (!s.ready) bits.push('正在读取软件包数据库…');
+  if (!s.ready) bits.push(L('正在读取软件包数据库…', 'Reading the package database…'));
   if (s.state === 'scanning') {
-    bits.push(`正在扫描 <b>${fmtInt(s.files)}</b> 个文件`, `<b>${fmtBytes(s.bytes)}</b>`, `${s.elapsed.toFixed(1)} 秒`);
+    bits.push(L(`正在扫描 <b>${fmtInt(s.files)}</b> 个文件`, `Scanning <b>${fmtInt(s.files)}</b> files`),
+      `<b>${fmtBytes(s.bytes)}</b>`, L(`${s.elapsed.toFixed(1)} 秒`, `${s.elapsed.toFixed(1)} s`));
     if (s.current) bits.push(`<span style="font-family:var(--mono)">${esc(s.current)}</span>`);
   } else if (s.state === 'done' || s.state === 'cancelled') {
-    bits.push(`${s.state === 'done' ? '扫描完成' : '已停止'}：<b>${fmtInt(s.files)}</b> 个文件，<b>${fmtInt(s.dirs)}</b> 个文件夹，用时 ${s.elapsed.toFixed(1)} 秒`);
-    if (s.fs_used && s.state === 'done') bits.push(`已统计 <b>${fmtBytes(s.bytes)}</b> / 分区已用 ${fmtBytes(s.fs_used)}`);
-    if (s.denied) bits.push(`<span title="${esc((s.denied_samples || []).join('\n'))}">${fmtInt(s.denied)} 个文件夹无权读取${s.admin ? '' : `（${osText().elevate}）`}</span>`);
+    const el2 = s.elapsed.toFixed(1);
+    bits.push(L(`${s.state === 'done' ? '扫描完成' : '已停止'}：<b>${fmtInt(s.files)}</b> 个文件，<b>${fmtInt(s.dirs)}</b> 个文件夹，用时 ${el2} 秒`,
+      `${s.state === 'done' ? 'Scan complete' : 'Stopped'}: <b>${fmtInt(s.files)}</b> files, <b>${fmtInt(s.dirs)}</b> folders in ${el2} s`));
+    if (s.fs_used && s.state === 'done') {
+      bits.push(L(`已统计 <b>${fmtBytes(s.bytes)}</b> / 分区已用 ${fmtBytes(s.fs_used)}`,
+        `Counted <b>${fmtBytes(s.bytes)}</b> of ${fmtBytes(s.fs_used)} used on the partition`));
+    }
+    if (s.denied) {
+      const tip = s.admin ? '' : L(`（${osText().elevate}）`, ` (${osText().elevate})`);
+      bits.push(`<span title="${esc((s.denied_samples || []).join('\n'))}">${L(`${fmtInt(s.denied)} 个文件夹无权读取`,
+        `${fmtInt(s.denied)} ${pl(s.denied, 'folder')} not readable`)}${tip}</span>`);
+    }
   } else if (s.state === 'error') {
-    bits.push(`扫描出错：${esc(s.error || '')}`);
+    bits.push(L(`扫描出错：${esc(s.error || '')}`, `Scan failed: ${esc(s.error || '')}`));
   } else {
-    bits.push('准备就绪');
+    bits.push(L('准备就绪', 'Ready'));
   }
   if (s.pkg && s.pkg.manager) {
     bits.push(s.pkg.manager === 'windows'
-      ? `已登记 ${fmtInt(s.pkg.packages)} 个已安装程序`
-      : `${esc(s.pkg.label || s.pkg.manager)}：${fmtInt(s.pkg.packages)} 个软件包`);
+      ? L(`已登记 ${fmtInt(s.pkg.packages)} 个已安装程序`, `${fmtInt(s.pkg.packages)} installed programs registered`)
+      : L(`${esc(s.pkg.label || s.pkg.manager)}：${fmtInt(s.pkg.packages)} 个软件包`,
+        `${esc(s.pkg.label || s.pkg.manager)}: ${fmtInt(s.pkg.packages)} packages`));
   }
-  if (s.procs && s.procs.refreshing && !s.procs.total) bits.push('正在读取运行中的程序…');
-  else if (s.procs && s.procs.total) bits.push(`运行中 ${fmtInt(s.procs.total)} 个进程，${fmtInt(s.procs.files)} 个文件在使用`);
+  if (s.procs && s.procs.refreshing && !s.procs.total) bits.push(L('正在读取运行中的程序…', 'Reading running programs…'));
+  else if (s.procs && s.procs.total) {
+    bits.push(L(`运行中 ${fmtInt(s.procs.total)} 个进程，${fmtInt(s.procs.files)} 个文件在使用`,
+      `${fmtInt(s.procs.total)} processes running, ${fmtInt(s.procs.files)} files in use`));
+  }
   el.innerHTML = bits.join(sep);
 }
 
@@ -874,7 +947,7 @@ function updateScanUI() {
   const scanning = S.status && S.status.state === 'scanning';
   $('progress').hidden = !scanning;
   $('cancelBtn').hidden = !scanning;
-  $('scanBtn').textContent = scanning ? '重新扫描' : (S.status && S.status.state !== 'idle' ? '重新扫描' : '扫描');
+  $('scanBtn').textContent = scanning || (S.status && S.status.state !== 'idle') ? L('重新扫描', 'Rescan') : L('扫描', 'Scan');
 }
 
 function schedulePoll(ms) {
@@ -886,7 +959,7 @@ async function poll() {
   try {
     S.status = await api('/api/status');
   } catch (e) {
-    $('status').textContent = '与 DiskMap 后台的连接已断开';
+    $('status').textContent = L('与 DiskMap 后台的连接已断开', 'Lost connection to the DiskMap backend');
     schedulePoll(3000);
     return;
   }
@@ -949,7 +1022,7 @@ async function runAgentCommand(cmd) {
     S.flash = { node: n, t0: performance.now() };
     drawOverlay();
   }
-  toast(`AI 助手：${cmd.note || `请看 ${path}`}`, 7000, true);
+  toast(L(`AI 助手：${cmd.note || `请看 ${path}`}`, `AI assistant: ${cmd.note || `look at ${path}`}`), 7000, true);
 }
 
 function renderAgentBadge() {
@@ -957,12 +1030,14 @@ function renderAgentBadge() {
   const active = ago != null && ago < 90;
   $('aiDot').hidden = !active;
   $('aiBtn').title = active
-    ? `AI 助手 ${Math.round(ago)} 秒前读取了分析结果`
-    : '把分析结果提供给 Claude 等 AI 助手';
+    ? L(`AI 助手 ${Math.round(ago)} 秒前读取了分析结果`, `An AI assistant read the results ${Math.round(ago)} s ago`)
+    : L('把分析结果提供给 Claude 等 AI 助手', 'Give Claude and other AI assistants access to the results');
   const st = $('aiStatus');
   if (st) {
-    st.textContent = ago == null ? '还没有 AI 助手连接过。'
-      : `最近一次 AI 助手访问：${ago < 60 ? `${Math.round(ago)} 秒前` : `${Math.round(ago / 60)} 分钟前`}`;
+    const when = ago == null ? '' : ago < 60 ? L(`${Math.round(ago)} 秒前`, `${Math.round(ago)} s ago`)
+      : L(`${Math.round(ago / 60)} 分钟前`, `${Math.round(ago / 60)} min ago`);
+    st.textContent = ago == null ? L('还没有 AI 助手连接过。', 'No AI assistant has connected yet.')
+      : L(`最近一次 AI 助手访问：${when}`, `Last AI access: ${when}`);
   }
 }
 
@@ -1006,8 +1081,8 @@ function renderDisks() {
   const cards = S.meta.disks.map((d) => {
     const letter = d.path.replace(/\\$/, '');
     let title = d.path;
-    if (win) title = d.system ? `系统盘 (${letter})` : `本地磁盘 (${letter})`;
-    else if (d.system) title = '整个系统';
+    if (win) title = d.system ? L(`系统盘 (${letter})`, `System drive (${letter})`) : L(`本地磁盘 (${letter})`, `Local disk (${letter})`);
+    else if (d.system) title = L('整个系统', 'Entire system');
     else if (S.meta.os === 'macos' && d.path.startsWith('/Volumes/')) title = d.path.slice(9);
     return {
       path: d.path, title,
@@ -1015,13 +1090,15 @@ function renderDisks() {
       used: d.used, total: d.total, free: d.free,
     };
   });
-  cards.push({ path: home, title: '我的主目录', sub: home });
+  cards.push({ path: home, title: L('我的主目录', 'My home folder'), sub: home });
   box.innerHTML = cards.map((c, i) => `
     <button class="disk" data-i="${i}">
       <div class="d-top"><span class="d-path">${esc(c.title)}</span>${c.total ? `<span class="d-fs">${esc(c.path)}</span>` : ''}</div>
       <div class="d-sub">${esc(c.sub)}</div>
       ${c.total ? `<div class="d-bar"><i style="width:${(c.used / c.total) * 100}%"></i></div>
-      <div class="d-nums">已用 ${fmtBytes(c.used)} / ${fmtBytes(c.total)} · 剩余 ${fmtBytes(c.free)}</div>` : '<div class="d-nums" style="margin-top:10px">只扫描个人文件</div>'}
+      <div class="d-nums">${L(`已用 ${fmtBytes(c.used)} / ${fmtBytes(c.total)} · 剩余 ${fmtBytes(c.free)}`,
+        `${fmtBytes(c.used)} of ${fmtBytes(c.total)} used · ${fmtBytes(c.free)} free`)}</div>`
+    : `<div class="d-nums" style="margin-top:10px">${L('只扫描个人文件', 'Personal files only')}</div>`}
     </button>`).join('');
   box.querySelectorAll('.disk').forEach((b) => {
     b.onclick = () => {
@@ -1074,7 +1151,8 @@ function bindEvents() {
       renderStatus();
       if (S.viewPath) await loadView(S.viewPath, { live: true });
       if (S.selected) select(S.selected);
-      toast(`已刷新：${S.status.procs.total} 个进程，${S.status.procs.files} 个文件正在使用`);
+      toast(L(`已刷新：${S.status.procs.total} 个进程，${S.status.procs.files} 个文件正在使用`,
+        `Refreshed: ${S.status.procs.total} processes, ${S.status.procs.files} files in use`));
     } catch (e) { toast(e.message); }
   };
 
@@ -1100,8 +1178,9 @@ function bindEvents() {
   $('aiClose').onclick = () => $('aiDialog').close();
   $('aiDialog').addEventListener('click', (e) => { if (e.target === $('aiDialog')) $('aiDialog').close(); });
   document.querySelectorAll('[data-copy]').forEach((b) => {
-    b.onclick = () => copyText($(b.dataset.copy).textContent, '已复制');
+    b.onclick = () => copyText($(b.dataset.copy).textContent, L('已复制', 'Copied'));
   });
+  $('langBtn').onclick = () => setLang(LANG === 'en' ? 'zh' : 'en');
 
   document.addEventListener('keydown', (e) => {
     if (e.target.closest('input, select, textarea')) return;
@@ -1127,22 +1206,53 @@ function renderLegendClasses() {
   });
 }
 
+/* 切换语言：保存到后台（下次启动和 AI 接口沿用），然后重画所有文字 */
+async function setLang(lang) {
+  try {
+    await api('/api/settings', { lang });
+    S.meta = await api('/api/meta');
+  } catch (e) { toast(e.message); return; }
+  LANG = lang;
+  applyStaticLang();
+  renderWelcome();
+  renderLegend();
+  renderTop();
+  renderCrumbs();
+  renderStatus();
+  updateScanUI();
+  renderAgentBadge();
+  select(S.selected && S.selected.path === S.selectedPath ? S.selected : null);
+  if (S.viewPath) await loadView(S.viewPath, { live: true });   // 方框里的文字和进程说明
+  else render();
+}
+
+function renderWelcome() {
+  $('welcomeHint').innerHTML = L('', ' ') + osText().hint;
+  renderDisks();
+}
+
 async function init() {
+  applyStaticLang();
   buildPalette();
   bindEvents();
   resize();
+  $('detail').innerHTML = detailPlaceholder();
   try {
     S.meta = await api('/api/meta');
   } catch (e) {
-    $('status').textContent = `无法连接 DiskMap 后台：${e.message}`;
+    $('status').textContent = L(`无法连接 DiskMap 后台：${e.message}`, `Cannot reach the DiskMap backend: ${e.message}`);
     return;
+  }
+  if (S.meta.lang && S.meta.lang !== LANG) {
+    LANG = S.meta.lang;
+    applyStaticLang();
+    $('detail').innerHTML = detailPlaceholder();
   }
   SEP = S.meta.sep || '/';
   document.documentElement.dataset.os = S.meta.os;
-  $('welcomeHint').innerHTML = osText().hint;
   $('version').textContent = `v${S.meta.version}`;
   if (!S.status || S.status.state === 'idle') $('pathInput').value = S.meta.system_root;
-  renderDisks();
+  renderWelcome();
   renderLegend();
   renderTop();
   S.status = await api('/api/status');

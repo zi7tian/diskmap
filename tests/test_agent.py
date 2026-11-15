@@ -10,6 +10,9 @@ import unittest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
+# 这些测试检查中文输出；英文见 test_i18n.py。设置写到临时目录，不碰真实配置。
+os.environ["DISKMAP_LANG"] = "zh"
+os.environ.setdefault("DISKMAP_CONFIG_DIR", tempfile.mkdtemp(prefix="diskmap-test-config-"))
 
 from backend import analysis, instance  # noqa: E402
 from backend.classify import USER  # noqa: E402

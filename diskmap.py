@@ -61,12 +61,12 @@ for _name in ("stdout", "stderr"):
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from backend import __version__, instance  # noqa: E402
+from backend import __version__, i18n, instance  # noqa: E402
+from backend.i18n import L  # noqa: E402
 from backend.osinfo import (FROZEN, IS_LINUX, IS_MAC, IS_WIN, clean_env,  # noqa: E402
                             clean_environ, is_admin, resource_dir, system_root, user_cache_dir)
 from backend.server import serve  # noqa: E402
 
-TITLE = "DiskMap 磁盘地图"
 VERBOSE = False
 
 
@@ -84,7 +84,7 @@ def open_pywebview(url):
     except ImportError:
         return "unavailable"
     try:
-        webview.create_window(TITLE, url, width=1440, height=900, min_size=(820, 560),
+        webview.create_window(L("DiskMap 磁盘地图", "DiskMap"), url, width=1440, height=900, min_size=(820, 560),
                               background_color="#0E1014")
         webview.start(gui="edgechromium" if IS_WIN else None)
         return "done"
@@ -155,7 +155,7 @@ def open_gtk(url):
 def _run_helper(python, url):
     try:
         icon = os.path.join(resource_dir(), "web", "favicon.png")
-        p = subprocess.Popen([python, "-c", GTK_HELPER, url, TITLE, icon], env=clean_env(),
+        p = subprocess.Popen([python, "-c", GTK_HELPER, url, L("DiskMap 磁盘地图", "DiskMap"), icon], env=clean_env(),
                              stdin=subprocess.DEVNULL,
                              stderr=None if VERBOSE else subprocess.DEVNULL)  # 屏蔽主题警告
     except OSError:
@@ -395,26 +395,40 @@ def _mcp_selftest(tmp, expected, check, step):
 
 
 # ------------------------------------------------------------------ AI / 脚本接口
+LANG_HELP = ("界面与输出语言：zh 中文、en 英文（默认沿用上次在界面里的选择，否则跟随系统）",
+             "language of the interface and output: zh Chinese, en English "
+             "(default: the last choice made in the window, otherwise the system language)")
+
+
 def cmd_mcp(argv):
+    i18n.set_default(i18n.resolve(i18n.pre_scan_argv(argv)))
     ap = argparse.ArgumentParser(prog="diskmap mcp",
-                                 description="以 MCP 服务方式运行（标准输入输出），供 Claude 等 AI 助手调用。")
+                                 description=L("以 MCP 服务方式运行（标准输入输出），供 Claude 等 AI 助手调用。",
+                                               "Run as an MCP server (stdio) for AI assistants such as Claude."))
     ap.add_argument("--no-attach", action="store_true",
-                    help="不连接已打开的 DiskMap 窗口，总是在后台独立扫描")
+                    help=L("不连接已打开的 DiskMap 窗口，总是在后台独立扫描",
+                           "do not connect to an open DiskMap window; always scan in the background"))
+    ap.add_argument("--lang", choices=i18n.LANGS, help=L(*LANG_HELP))
     args = ap.parse_args(argv)
     from backend import mcp_server
-    return mcp_server.run(attach=not args.no_attach)
+    return mcp_server.run(attach=not args.no_attach, lang=args.lang)
 
 
 def cmd_analyze(argv):
+    i18n.set_default(i18n.resolve(i18n.pre_scan_argv(argv)))
     ap = argparse.ArgumentParser(prog="diskmap analyze",
-                                 description="扫描并输出分析报告（Markdown 或 JSON），方便 AI 助手或脚本读取。")
-    ap.add_argument("path", nargs="?", help="要分析的文件夹，默认是系统盘")
-    ap.add_argument("--json", action="store_true", help="输出 JSON 而不是 Markdown")
-    ap.add_argument("--top", type=int, default=15, help="每个列表显示几项（默认 15）")
-    ap.add_argument("-o", "--output", help="写入文件而不是标准输出")
-    ap.add_argument("--apparent", action="store_true", help="按文件长度而不是实际占用空间统计")
-    ap.add_argument("--same-fs", action="store_true", help="不进入其他分区")
-    ap.add_argument("-q", "--quiet", action="store_true", help="不显示扫描进度")
+                                 description=L("扫描并输出分析报告（Markdown 或 JSON），方便 AI 助手或脚本读取。",
+                                               "Scan and print an analysis report (Markdown or JSON) for AI "
+                                               "assistants and scripts."))
+    ap.add_argument("path", nargs="?", help=L("要分析的文件夹，默认是系统盘", "folder to analyze (default: system drive)"))
+    ap.add_argument("--json", action="store_true", help=L("输出 JSON 而不是 Markdown", "print JSON instead of Markdown"))
+    ap.add_argument("--top", type=int, default=15, help=L("每个列表显示几项（默认 15）", "items per list (default 15)"))
+    ap.add_argument("-o", "--output", help=L("写入文件而不是标准输出", "write to a file instead of standard output"))
+    ap.add_argument("--apparent", action="store_true",
+                    help=L("按文件长度而不是实际占用空间统计", "count file length instead of space on disk"))
+    ap.add_argument("--same-fs", action="store_true", help=L("不进入其他分区", "stay on one file system"))
+    ap.add_argument("-q", "--quiet", action="store_true", help=L("不显示扫描进度", "do not show scan progress"))
+    ap.add_argument("--lang", choices=i18n.LANGS, help=L(*LANG_HELP))
     args = ap.parse_args(argv)
     from backend import analysis
     from backend.server import App
@@ -431,26 +445,30 @@ def cmd_analyze(argv):
         time.sleep(0.2)
         if not args.quiet and time.time() - last > 1:
             last = time.time()
-            print(f"\r正在扫描 {s.nfiles:,} 个文件，{analysis.human(s.bytes)}…", end="",
+            print("\r" + L(f"正在扫描 {s.nfiles:,} 个文件，{analysis.human(s.bytes)}…",
+                           f"Scanning {s.nfiles:,} files, {analysis.human(s.bytes)}…"), end="",
                   file=sys.stderr, flush=True)
     deadline = time.time() + 20   # 等"正在使用的文件"读取完成
     while (app.proc.refreshing or app.proc.time == 0) and time.time() < deadline:
         time.sleep(0.1)
     if not args.quiet:
-        print(f"\r扫描完成：{s.nfiles:,} 个文件，用时 {time.time() - s.started:.1f} 秒" + " " * 20,
+        took = time.time() - s.started
+        print("\r" + L(f"扫描完成：{s.nfiles:,} 个文件，用时 {took:.1f} 秒",
+                       f"Scan complete: {s.nfiles:,} files in {took:.1f} s") + " " * 20,
               file=sys.stderr, flush=True)
     if s.state == "error":
-        print(f"扫描出错：{s.error}", file=sys.stderr)
+        print(L(f"扫描出错：{s.error}", f"Scan failed: {s.error}"), file=sys.stderr)
         return 1
     if args.json:
-        text = json.dumps(analysis.report_json(app, s.root_path, args.top), ensure_ascii=False, indent=2) + "\n"
+        text = json.dumps(i18n.loc(analysis.report_json(app, s.root_path, args.top)),
+                          ensure_ascii=False, indent=2) + "\n"
     else:
         text = analysis.report_markdown(app, s.root_path, args.top)
     if args.output:
         with open(args.output, "w", encoding="utf-8") as f:
             f.write(text)
         if not args.quiet:
-            print(f"报告已写入 {args.output}", file=sys.stderr)
+            print(L(f"报告已写入 {args.output}", f"Report written to {args.output}"), file=sys.stderr)
     else:
         try:
             sys.stdout.reconfigure(encoding="utf-8")   # 输出被重定向到文件时统一用 UTF-8
@@ -470,20 +488,29 @@ def main():
         code = cmd_analyze(sys.argv[2:])
         sys.stdout.flush()
         os._exit(code)
+    i18n.set_default(i18n.resolve(i18n.pre_scan_argv(sys.argv[1:])))
     ap = argparse.ArgumentParser(
-        description="DiskMap 磁盘地图：可视化磁盘占用并标注文件重要程度",
-        epilog="AI 助手 / 脚本接口：  diskmap mcp   （MCP 服务）    diskmap analyze [路径] [--json]   （分析报告）")
-    ap.add_argument("path", nargs="?", help="启动后立即扫描的文件夹（例如 / 、/home 或 D:\\）")
+        description=L("DiskMap 磁盘地图：可视化磁盘占用并标注文件重要程度",
+                      "DiskMap: see what uses your disk space, with every file marked by importance"),
+        epilog=L("AI 助手 / 脚本接口：  diskmap mcp   （MCP 服务）    diskmap analyze [路径] [--json]   （分析报告）",
+                 "For AI assistants / scripts:  diskmap mcp   (MCP server)    "
+                 "diskmap analyze [path] [--json]   (analysis report)"))
+    ap.add_argument("path", nargs="?", help=L("启动后立即扫描的文件夹（例如 / 、/home 或 D:\\）",
+                                              "folder to scan right away (e.g. /, /home or D:\\)"))
     ap.add_argument("--port", type=int, default=int(os.environ.get("DISKMAP_PORT", 0)),
-                    help="本地端口（默认自动选择）")
-    ap.add_argument("--browser", action="store_true", help="用默认浏览器打开界面")
-    ap.add_argument("--no-open", action="store_true", help="不打开任何窗口，只输出访问链接")
-    ap.add_argument("--apparent", action="store_true", help="按文件大小而不是实际占用的磁盘空间统计")
-    ap.add_argument("--same-fs", action="store_true", help="不进入其他分区（类似 du -x）")
-    ap.add_argument("--verbose", action="store_true", help="输出调试信息")
+                    help=L("本地端口（默认自动选择）", "local port (default: automatic)"))
+    ap.add_argument("--browser", action="store_true", help=L("用默认浏览器打开界面", "open the interface in the default browser"))
+    ap.add_argument("--no-open", action="store_true",
+                    help=L("不打开任何窗口，只输出访问链接", "do not open a window; only print the link"))
+    ap.add_argument("--apparent", action="store_true",
+                    help=L("按文件大小而不是实际占用的磁盘空间统计", "count file length instead of space on disk"))
+    ap.add_argument("--same-fs", action="store_true",
+                    help=L("不进入其他分区（类似 du -x）", "stay on one file system (like du -x)"))
+    ap.add_argument("--verbose", action="store_true", help=L("输出调试信息", "print debug information"))
     ap.add_argument("--ui", choices=["webview", "gtk", "chromium", "browser"],
                     default=os.environ.get("DISKMAP_UI") or None,
-                    help="指定界面方式（默认自动选择）")
+                    help=L("指定界面方式（默认自动选择）", "how to show the interface (default: automatic)"))
+    ap.add_argument("--lang", choices=i18n.LANGS, help=L(*LANG_HELP))
     ap.add_argument("--selftest", action="store_true", help=argparse.SUPPRESS)
     ap.add_argument("--report", help=argparse.SUPPRESS)
     ap.add_argument("--version", action="version", version=f"DiskMap {__version__}")
@@ -512,14 +539,16 @@ def main():
         instance.write(httpd.server_address[1], token, __version__)
     except (OSError, KeyError):
         pass
-    print(f"DiskMap 已启动：{url}", flush=True)
+    print(L(f"DiskMap 已启动：{url}", f"DiskMap is running: {url}"), flush=True)
     if not IS_WIN and is_admin() and not args.no_open:
-        print("以 root 运行：为安全起见不自动打开窗口，请在普通用户的浏览器中打开上面的链接。", flush=True)
+        print(L("以 root 运行：为安全起见不自动打开窗口，请在普通用户的浏览器中打开上面的链接。",
+                "Running as root: no window is opened for safety. Open the link above in a browser "
+                "as a normal user."), flush=True)
         args.no_open = True
 
     try:
         if args.no_open:
-            print("按 Ctrl+C 退出。", flush=True)
+            print(L("按 Ctrl+C 退出。", "Press Ctrl+C to quit."), flush=True)
             threading.Event().wait()
         else:
             run_ui(url, app, args.browser or args.ui == "browser", args.ui)

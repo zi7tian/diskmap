@@ -3,7 +3,7 @@ name: diskmap
 description: Find out what is filling up a disk on Windows, macOS or Linux and give safe cleanup advice, using DiskMap, a free open-source analyzer that classifies every file and folder by importance (system core, in use by a running program, installed software, settings, personal data, cache). Use when the user asks why their disk is full, what is taking up space, whether something is safe to delete, or how to free up space.
 license: MIT
 metadata:
-  version: "1.2.0"
+  version: "1.3.0"
   homepage: https://github.com/zi7tian/diskmap
 ---
 
@@ -32,7 +32,8 @@ Check these in order and use the first one that works:
    - Linux: the `DiskMap` file inside the extracted `DiskMap` folder
    - From source: `python3 diskmap.py` in a clone of the repository (Python 3.9+)
    Confirm it runs with `<program> --version`. Report mode and the MCP server need version 1.2.0
-   or newer; with an older version, ask the user to update from the releases page.
+   or newer, and English output needs 1.3.0 or newer; with an older version, ask the user to
+   update from the releases page.
 3. **DiskMap is not installed.** Tell the user what it is and where to get it
    (https://github.com/zi7tian/diskmap/releases/latest; `references/setup.md` says which file
    fits their system). Let the user download and install it themselves, or do it only after
@@ -81,6 +82,8 @@ If they are in the middle of looking at something, ask before switching to a dif
 
 - Without `--json` the report is Markdown. `--top N` sets list length (default 15).
 - `--apparent` counts file length instead of space on disk; `--same-fs` stays on one partition.
+- `--lang en` or `--lang zh` sets the report language (default: the language chosen in the
+  DiskMap window, otherwise the system language).
 - Writing to a file with `-o` is the most reliable way to collect output, especially on Windows.
 - Allow a generous timeout (10 minutes) for a whole drive. Progress goes to stderr unless `-q`.
 - The JSON has three parts: `status`, `summary` and `cleanup`. They use the same fields as the
@@ -90,9 +93,12 @@ If they are in the middle of looking at something, ask before switching to a dif
 ## 4. Reading the results
 
 Each item has `path`, `type` (`dir`, `file`, or `group` = many small files counted together),
-`bytes` and `size`, `category`, `reason`, `safety` and `advice`. Decide using the English keys
-(`category`, `safety`). The descriptive text (`category_label`, `reason`, `advice`, `note`,
-`used_by`) is written in Chinese; translate it into the user's language when you quote it.
+`bytes` and `size`, `category`, `reason`, `safety` and `advice`. Decide using the keys
+(`category`, `safety`), which never change. The descriptive text (`category_label`, `reason`,
+`advice`, `note`, `used_by`) is in DiskMap's interface language, English or Chinese: the language
+picked with the button in the DiskMap window, otherwise the system language. Add `--lang en` to the
+MCP server arguments or to `analyze` to force English. Translate the text when it is not in the
+user's language.
 
 | `category` | What it is | `safety` | What to tell the user |
 |---|---|---|---|

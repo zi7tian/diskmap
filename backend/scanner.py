@@ -5,6 +5,7 @@ import time
 from collections import deque
 
 from .classify import NCLS, RUNNING
+from .i18n import L
 from .mounts import DISK_FS, fs_usage, read_mounts, skip_paths
 from .osinfo import IS_WIN, SEP, cluster_size, join_path, norm_path, pkey
 
@@ -99,7 +100,7 @@ class Scan:
 
     def _run(self):
         if not os.path.isdir(self.root_path):
-            raise FileNotFoundError(f"不是文件夹：{self.root_path}")
+            raise FileNotFoundError(L(f"不是文件夹：{self.root_path}", f"Not a folder: {self.root_path}"))
         mounts = {pkey(mp): (mp, info) for mp, info in read_mounts().items()}
         # 找到起点所在的文件系统（最长的挂载点前缀）
         rootk = pkey(self.root_path)

@@ -1,8 +1,10 @@
 # DiskMap result reference
 
 All sizes are bytes in `bytes` plus a human-readable `size` in binary units (1 KB = 1024 B).
-English keys are stable and meant for decisions; text values (labels, reasons, advice, notes,
-process descriptions, errors) are in Chinese and should be translated for the user.
+Keys and enum values (`category`, `safety`, `type`, ...) never change and are meant for decisions.
+Text values (labels, reasons, advice, notes, process descriptions, errors) follow DiskMap's
+language setting, English or Chinese (`--lang en|zh`); translate them when they are not in the
+user's language. Examples below show the English text.
 
 ## Item fields (lists, summaries, cleanup candidates)
 
@@ -12,24 +14,24 @@ process descriptions, errors) are in Chinese and should be translated for the us
 | `type` | `dir`, `file`, or `group` (many small files counted as one item; see `count`, `note`) |
 | `bytes`, `size` | Space used (on disk by default, file length when the scan used `apparent`) |
 | `category` | `core`, `running`, `system`, `config`, `user`, `cache`, `other` |
-| `category_label` | Chinese name of the category |
-| `reason` | Why it got this category, e.g. `系统程序目录 /usr` ("system program directory /usr") |
+| `category_label` | Display name of the category, e.g. `Cache / temp` |
+| `reason` | Why it got this category, e.g. `System programs /usr` |
 | `percent_of_parent` | Share of the parent folder, in percent |
 | `files`, `dirs` | (folders) number of files and subfolders inside, recursively |
 | `in_use_files` | (folders) how many files inside are used by running programs |
-| `used_by` | (files) which programs use it, e.g. `chrome ×2、niri 等 7 个程序` ("chrome ×2, niri and 7 programs in total") |
+| `used_by` | (files) which programs use it, e.g. `chrome ×2, niri and others (7 programs)` |
 | `static_category` | (in-use files) the category the file would have if nothing used it |
 | `package` | Package or installed program that owns the file (pacman, dpkg, rpm, Homebrew, Windows uninstall registry) |
 | `denied` | Folder could not be read; its size is missing from the totals |
 | `mount_point` | Another filesystem is mounted here |
 | `safety` | `danger`, `in_use`, `uninstall_only`, `caution`, `ask_user`, `safe_to_clean` |
-| `advice` | Chinese one-sentence advice matching `safety` |
+| `advice` | One-sentence advice matching `safety` |
 
 ## `diskmap_status` / report `status`
 
 ```json
 {
-  "version": "1.2.0", "os": "linux", "admin": false, "ready": true,
+  "version": "1.3.0", "os": "linux", "admin": false, "ready": true,
   "window_connected": false,
   "processes": {"total": 320, "in_use_files": 1621, "visible_processes": 294},
   "scan": {
@@ -82,13 +84,13 @@ first. Call it again on a child folder to go deeper.
 
 Item fields plus:
 - folders: `largest_children` (8 items)
-- files: `used_by` as a list of `{pid, comm, kind}` (kind: `正在执行` executing, `已加载到内存`
-  loaded into memory, `已打开` open, `交换文件` swap file) and `used_by_count`;
+- files: `used_by` as a list of `{pid, comm, kind}` (kind: executing, loaded into memory, open,
+  swap file) and `used_by_count`;
   `file_length_bytes` (file length, which can differ from space on disk for sparse or compressed
   files)
 - `modified` (local time), `mode`, `owner`, `group`, `mount` (`fstype`, `source`) when available
-- `note`: `该项目在扫描后已被删除或移动。` (deleted or moved since the scan) or
-  `没有权限读取此文件夹，大小未计入。` (no permission; size not counted)
+- `note`: the item was deleted or moved since the scan, or the folder could not be read (size not
+  counted)
 
 ## `diskmap_cleanup` / report `cleanup`
 
@@ -113,15 +115,15 @@ in use.
 
 `analyze --json` prints `{"status": ..., "summary": ..., "cleanup": ...}` with the structures
 above (summary and cleanup for the analyzed path, `--top` items per list). The Markdown report
-has the same content in Chinese under the headings 按重要程度 (by category), 最大的子项 (largest
-children), 最大的文件 (largest files) and 可清理候选 (cleanup candidates).
+has the same content under the headings "By importance", "Largest items", "Largest files" and
+"Cleanup candidates" (in Chinese: 按重要程度, 最大的子项, 最大的文件, 可清理候选).
 
 ## Errors
 
-| Message (Chinese) | Meaning | What to do |
-|---|---|---|
-| `还没有扫描结果` | Nothing scanned yet | Call `diskmap_scan` |
-| `扫描结果中没有这个路径` | Path is outside the scanned area or does not exist | Check the path, or scan a folder that contains it |
-| `这是一个文件而不是文件夹` | A folder tool was given a file | Use `diskmap_explain` |
-| `未知类别` | Invalid `category` | Use one of the seven category keys |
-| `用户没有打开 DiskMap 窗口` | Window tools need the DiskMap window open | Ask the user to open DiskMap, or tell them the path directly |
+| Message (English / Chinese) | What to do |
+|---|---|
+| `Nothing has been scanned yet` / `还没有扫描结果` | Call `diskmap_scan` |
+| `This path is not in the scan results` / `扫描结果中没有这个路径` | Check the path, or scan a folder that contains it |
+| `This is a file, not a folder` / `这是一个文件而不是文件夹` | Use `diskmap_explain` |
+| `Unknown category` / `未知类别` | Use one of the seven category keys |
+| `The DiskMap window is not open` / `用户没有打开 DiskMap 窗口` | Ask the user to open DiskMap, or tell them the path directly |

@@ -10,6 +10,7 @@ import subprocess
 import sys
 import time
 
+from .i18n import T
 from .osinfo import IS_MAC, IS_WIN
 
 
@@ -115,7 +116,7 @@ class PkgDB:
     def _load_windows(self):
         import winreg
         self.manager = "windows"
-        self.label = "已安装的程序"
+        self.label = T("已安装的程序", "Installed programs")
         sub = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall"
         sources = [
             (winreg.HKEY_LOCAL_MACHINE, winreg.KEY_WOW64_64KEY),

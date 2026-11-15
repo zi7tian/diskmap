@@ -68,6 +68,18 @@ def user_cache_dir():
     return os.path.join(os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache"), "diskmap")
 
 
+def user_config_dir():
+    """保存设置（如界面语言）的位置。"""
+    if os.environ.get("DISKMAP_CONFIG_DIR"):
+        return os.environ["DISKMAP_CONFIG_DIR"]
+    if IS_WIN:
+        base = os.environ.get("APPDATA") or os.path.expanduser("~\\AppData\\Roaming")
+        return os.path.join(base, "DiskMap")
+    if IS_MAC:
+        return os.path.expanduser("~/Library/Application Support/DiskMap")
+    return os.path.join(os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config"), "diskmap")
+
+
 def cluster_size(path):
     """Windows 上文件按簇分配空间，用于估算"实际占用"。"""
     if not IS_WIN:

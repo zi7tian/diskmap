@@ -82,6 +82,11 @@ On Windows, write backslashes in JSON as `\\` (for example
 
 Restart the AI client after changing its configuration. The tools then appear as `diskmap_*`.
 
+**Language.** Results come in DiskMap's interface language (English or Chinese): the language picked
+with the button in the top-right corner of the DiskMap window, otherwise the system language. To fix
+it for the AI, add it to the arguments, for example `"args": ["mcp", "--lang", "en"]` or
+`claude mcp add --scope user diskmap -- <program> mcp --lang en`.
+
 ## How the MCP server finds the data
 
 - If the DiskMap window is open, the MCP server connects to it. The AI then sees the window's scan
@@ -100,4 +105,6 @@ Restart the AI client after changing its configuration. The tools then appear as
   the user to open DiskMap, or continue without the window.
 - `analyze` prints nothing on Windows: use `-o report.json` and read the file.
 - Linux build fails to start on an old distribution (glibc error): run from source instead.
-- `--version` prints the installed version; the skill describes version 1.2.0.
+- Results are in Chinese but the user writes in English: switch the DiskMap window to English
+  (top-right button), or add `--lang en` to the MCP arguments or the `analyze` command.
+- `--version` prints the installed version; the skill describes version 1.3.0.

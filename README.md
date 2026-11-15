@@ -3,7 +3,11 @@
 用"方框套方框"的方式查看磁盘空间都去哪儿了：每个方框是一个文件或文件夹，面积等于它占用的空间，
 文件夹里套着它的子文件夹和文件。方框的颜色表示**重要程度**，一眼就能看出哪些能删、哪些不能碰。
 
-支持 **Windows 10/11、macOS 11+、Linux**。DiskMap 只读取磁盘，不会删除或修改任何文件。
+支持 **Windows 10/11、macOS 11+、Linux**，界面有**中文和英文**两种语言。DiskMap 只读取磁盘，不会删除或修改任何文件。
+
+*English: DiskMap shows disk usage as nested boxes colored by importance (system core, in use, installed
+software, settings, personal files, cache). The interface is available in English and Chinese: it follows
+the system language, and the button in the top-right corner switches it.*
 
 | 颜色 | 类别 | Windows | macOS | Linux |
 |---|---|---|---|---|
@@ -55,6 +59,14 @@ DiskMap 的界面是一个本地网页，按以下顺序选择显示方式：
 - 标题栏上的 **红点** 表示文件夹里有正在使用的文件；斜线方框是合并显示的小项目
 - 扫描过程中画面实时更新，不用等扫描结束
 
+## 界面语言
+
+- 第一次打开时跟随系统语言：中文系统显示中文，其他系统显示英文
+- 点右上角的 **English / 中文** 按钮切换，选择会保存下来，下次打开、以及 AI 接口和分析报告都沿用
+- 命令行可以用 `--lang zh` 或 `--lang en` 临时指定，例如 `DiskMap analyze / --lang en`
+- 设置保存在 `~/.config/diskmap/settings.json`（macOS 为 `~/Library/Application Support/DiskMap`，
+  Windows 为 `%APPDATA%\DiskMap`）
+
 ## 让 AI 助手读取分析结果（MCP）
 
 DiskMap 内置 [MCP](https://modelcontextprotocol.io) 服务，Claude Code、Claude Desktop、Cursor 等支持 MCP 的
@@ -86,7 +98,8 @@ macOS 上的路径是 `/Applications/DiskMap.app/Contents/MacOS/DiskMap`；源�
 | `diskmap_show` | 让窗口跳转并高亮某个项目，附一句说明（AI 给你指出它说的东西） |
 
 每一项结果都带 `safety` 字段：`danger`（系统核心）、`in_use`（正被使用）、`uninstall_only`（应卸载而非删除）、
-`caution`、`ask_user`（个人文件，由你决定）、`safe_to_clean`（通常可安全清理），以及中文建议。
+`caution`、`ask_user`（个人文件，由你决定）、`safe_to_clean`（通常可安全清理），以及一句建议。
+建议、原因等文字使用界面语言；想固定给 AI 用英文，在命令末尾加 `--lang en`（如 `DiskMap mcp --lang en`）。
 
 - **连接你的窗口**：如果你已经打开了 DiskMap，AI 看到的就是窗口里的扫描结果；AI 发起的扫描也会显示在窗口里，
   右上角「AI 接入」旁的绿点表示最近有 AI 读取过结果。没打开窗口时，MCP 服务会在后台自己扫描。
@@ -118,7 +131,8 @@ python diskmap.py D:\        # 立即扫描指定位置
 python diskmap.py --browser  # 用默认浏览器
 ```
 
-其他参数：`--apparent` 按文件长度而不是实际占用统计；`--same-fs` 不进入其他分区；`--port` 指定端口。
+其他参数：`--apparent` 按文件长度而不是实际占用统计；`--same-fs` 不进入其他分区；`--port` 指定端口；
+`--lang zh|en` 指定界面语言。
 
 ## 打包
 
@@ -155,6 +169,7 @@ glibc，在老发行版上可能无法运行。图标由 `packaging/make_icons.p
 diskmap.py            启动器：本地服务 + 窗口（pywebview / GTK / Chrome 应用模式 / 浏览器）、
                       mcp / analyze 子命令、自检
 backend/analysis.py   给 AI 和报告用的分析：概览、列表、解释、可清理候选、安全建议
+backend/i18n.py       中英文切换：双语文本、按请求指定语言、保存语言设置
 backend/mcp_server.py MCP 服务（标准库实现的 JSON-RPC over stdio），连接用户窗口或后台扫描
 backend/instance.py   运行中的窗口登记自己，供 MCP 服务找到
 backend/osinfo.py     平台差异（路径、管理员判断、交换文件、打包环境）

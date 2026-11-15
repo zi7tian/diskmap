@@ -7,6 +7,7 @@ import heapq
 import time
 
 from .classify import CACHE, CLASSES, CONFIG, CORE, NCLS, OTHER, RUNNING, SYSTEM, USER
+from .i18n import L, T, tx
 from .osinfo import SEP, join_path, pkey
 from .scanner import DENIED, MOUNT
 
@@ -15,13 +16,21 @@ LABELS = [c["label"] for c in CLASSES]
 
 # 安全等级（机器可读） + 建议（给人看的）
 SAFETY = {
-    CORE: ("danger", "系统核心：不要删除或修改，否则可能无法开机。"),
-    RUNNING: ("in_use", "正被程序使用：如需删除，先关闭相关程序。"),
-    SYSTEM: ("uninstall_only", "系统或已安装程序的文件：应通过包管理器/系统设置卸载对应软件，不要手动删除。"),
-    CONFIG: ("caution", "配置文件：删除会丢失相应程序的设置，确认不再需要再删。"),
-    USER: ("ask_user", "用户的个人文件：是否删除只能由用户决定，请先询问。"),
-    CACHE: ("safe_to_clean", "缓存/临时文件：通常可以安全清理，程序会按需重新生成。"),
-    OTHER: ("caution", "应用数据：删除前确认对应程序已不再使用。"),
+    CORE: ("danger", T("系统核心：不要删除或修改，否则可能无法开机。",
+                       "System core: do not delete or modify, or the system may not boot.")),
+    RUNNING: ("in_use", T("正被程序使用：如需删除，先关闭相关程序。",
+                          "In use by a program: close that program before deleting.")),
+    SYSTEM: ("uninstall_only", T("系统或已安装程序的文件：应通过包管理器/系统设置卸载对应软件，不要手动删除。",
+                                 "Belongs to the system or an installed program: uninstall the software "
+                                 "(package manager / system settings) instead of deleting files by hand.")),
+    CONFIG: ("caution", T("配置文件：删除会丢失相应程序的设置，确认不再需要再删。",
+                          "Settings: deleting loses that program's settings. Only delete if no longer needed.")),
+    USER: ("ask_user", T("用户的个人文件：是否删除只能由用户决定，请先询问。",
+                         "Personal files: only the user can decide whether to delete them. Ask first.")),
+    CACHE: ("safe_to_clean", T("缓存/临时文件：通常可以安全清理，程序会按需重新生成。",
+                               "Cache / temporary files: usually safe to clean; programs recreate them as needed.")),
+    OTHER: ("caution", T("应用数据：删除前确认对应程序已不再使用。",
+                         "Application data: make sure the program that owns it is no longer used before deleting.")),
 }
 
 
@@ -45,20 +54,23 @@ def _pct(a, b):
 
 
 def _cat(cls):
-    return {"category": KEYS[cls], "category_label": LABELS[cls]}
+    return {"category": KEYS[cls], "category_label": tx(LABELS[cls])}
 
 
 def _safety(cls, in_use=0):
     level, advice = SAFETY[cls]
+    advice = tx(advice)
     if in_use and cls != RUNNING:
-        advice += f"其中有 {in_use} 个文件正被程序使用，清理前先关闭相关程序。"
+        advice += L(f"其中有 {in_use} 个文件正被程序使用，清理前先关闭相关程序。",
+                    f" {in_use} files inside are in use; close those programs before cleaning.")
     return {"safety": level, "advice": advice}
 
 
 def _scan(app):
     s = app.scan
     if s is None:
-        raise AnalysisError("还没有扫描结果。请先调用 diskmap_scan 扫描一个文件夹或磁盘。")
+        raise AnalysisError(L("还没有扫描结果。请先调用 diskmap_scan 扫描一个文件夹或磁盘。",
+                               "Nothing has been scanned yet. Call diskmap_scan on a folder or drive first."))
     return s
 
 
@@ -66,17 +78,23 @@ def _dir(app, path):
     s = _scan(app)
     node, f = s.find(path or s.root_path)
     if node is None:
-        raise AnalysisError(f"扫描结果中没有这个路径：{path}（当前扫描范围是 {s.root_path}）")
+        raise AnalysisError(_not_found(path, s))
     if f is not None:
-        raise AnalysisError(f"这是一个文件而不是文件夹：{path}。查看文件请用 diskmap_explain。")
+        raise AnalysisError(L(f"这是一个文件而不是文件夹：{path}。查看文件请用 diskmap_explain。",
+                               f"This is a file, not a folder: {path}. Use diskmap_explain for files."))
     return node
+
+
+def _not_found(path, s):
+    return L(f"扫描结果中没有这个路径：{path}（当前扫描范围是 {s.root_path}）",
+             f"This path is not in the scan results: {path} (the scan covers {s.root_path})")
 
 
 def _scan_note(s):
     if s.state == "scanning":
-        return "扫描仍在进行中，以下数据还不完整。"
+        return L("扫描仍在进行中，以下数据还不完整。", "The scan is still running; these numbers are incomplete.")
     if s.state == "cancelled":
-        return "扫描被中途停止，以下数据不完整。"
+        return L("扫描被中途停止，以下数据不完整。", "The scan was stopped; these numbers are incomplete.")
     return None
 
 
@@ -84,7 +102,7 @@ def _scan_note(s):
 def dir_entry(app, d, parent_size=None):
     in_use = app.proc.dir_count(d.path)
     e = {"path": d.path, "type": "dir", "bytes": d.size, "size": human(d.size),
-         **_cat(d.cls), "reason": d.reason, "files": d.nfiles, "dirs": d.ndirs}
+         **_cat(d.cls), "reason": tx(d.reason), "files": d.nfiles, "dirs": d.ndirs}
     if parent_size:
         e["percent_of_parent"] = _pct(d.size, parent_size)
     if in_use:
@@ -104,7 +122,7 @@ def file_entry(app, d, f, parent_size=None):
     cls = RUNNING if used_by else static
     _, reason = app.classifier.explain_file(d.cls, d.reason, d.path, f[0], path)
     e = {"path": path, "type": "file", "bytes": f[1], "size": human(f[1]), **_cat(cls),
-         "reason": reason}
+         "reason": tx(reason)}
     if parent_size:
         e["percent_of_parent"] = _pct(f[1], parent_size)
     if used_by:
@@ -119,7 +137,8 @@ def file_entry(app, d, f, parent_size=None):
 
 def _group_entry(d, f, parent_size=None):
     e = {"path": d.path, "type": "group", "count": f[3], "bytes": f[1], "size": human(f[1]),
-         **_cat(f[2]), "note": f"{d.path} 中 {f[3]} 个较小的文件合并统计"}
+         **_cat(f[2]), "note": L(f"{d.path} 中 {f[3]} 个较小的文件合并统计",
+                       f"{f[3]} smaller files in {d.path}, counted together")}
     if parent_size:
         e["percent_of_parent"] = _pct(f[1], parent_size)
     return e
@@ -151,7 +170,8 @@ def status(app):
                          "visible_processes": app.proc.visible}}
     if s is None:
         out["scan"] = None
-        out["hint"] = "还没有扫描。调用 diskmap_scan 开始，例如扫描整个系统盘。"
+        out["hint"] = L("还没有扫描。调用 diskmap_scan 开始，例如扫描整个系统盘。",
+                        "Nothing scanned yet. Call diskmap_scan to start, for example on the system drive.")
         return out
     end = s.finished or now
     out["scan"] = {
@@ -164,8 +184,10 @@ def status(app):
         "includes_other_partitions": s.cross_fs,
     }
     if s.denied:
-        out["scan"]["denied_note"] = (f"有 {s.denied} 个文件夹因权限不足没有统计；"
-                                      "以管理员/root 身份运行 DiskMap 可以看到全部。")
+        out["scan"]["denied_note"] = L(f"有 {s.denied} 个文件夹因权限不足没有统计；"
+                                       "以管理员/root 身份运行 DiskMap 可以看到全部。",
+                                       f"{s.denied} folders could not be read (no permission) and are not "
+                                       "counted; run DiskMap as administrator/root to see everything.")
     if app.ui_state:
         out["user_view"] = {k: app.ui_state.get(k) for k in ("view", "selected")}
     return out
@@ -187,7 +209,7 @@ def summary(app, path=None, top=10):
     running.sort(key=lambda h: -h[1])
     out = {
         "path": d.path, "bytes": d.size, "size": human(d.size), "files": d.nfiles, "dirs": d.ndirs,
-        **_cat(d.cls), "reason": d.reason,
+        **_cat(d.cls), "reason": tx(d.reason),
         "by_category": by_cat,
         "largest_children": children,
         "largest_files": largest,
@@ -235,10 +257,10 @@ def explain(app, path):
     s = _scan(app)
     info = app.info(path)
     if info is None:
-        raise AnalysisError(f"扫描结果中没有这个路径：{path}（当前扫描范围是 {s.root_path}）")
+        raise AnalysisError(_not_found(path, s))
     cls = info["cls"]
     out = {"path": info["path"], "type": info["type"], "bytes": info["size"], "size": human(info["size"]),
-           **_cat(cls), "reason": info.get("reason")}
+           **_cat(cls), "reason": tx(info.get("reason"))}
     if info["type"] == "dir":
         node, _ = s.find(info["path"])
         out.update(files=info["nfiles"], dirs=info["ndirs"])
@@ -263,9 +285,9 @@ def explain(app, path):
         if info.get(k):
             out["modified" if k == "mtime" else k] = info[k]
     if info.get("gone"):
-        out["note"] = "该项目在扫描后已被删除或移动。"
+        out["note"] = L("该项目在扫描后已被删除或移动。", "This item was deleted or moved after the scan.")
     if info.get("denied"):
-        out["note"] = "没有权限读取此文件夹，大小未计入。"
+        out["note"] = L("没有权限读取此文件夹，大小未计入。", "No permission to read this folder; its size is not counted.")
     return out
 
 
@@ -307,10 +329,12 @@ def cleanup(app, path=None, limit=30, min_bytes=1 << 20):
             items.append(file_entry(app, x, f))
     res = {"path": d.path, "reclaimable_bytes": total, "reclaimable_size": human(total),
            "candidates_shown": len(items), "candidates": items,
-           "note": "只是建议：DiskMap 不会删除任何文件。删除前请让用户确认；标记为 in_use 的项目需先关闭相关程序。"}
+           "note": L("只是建议：DiskMap 不会删除任何文件。删除前请让用户确认；标记为 in_use 的项目需先关闭相关程序。",
+                     "Suggestions only: DiskMap never deletes files. Get the user's confirmation before deleting; "
+                     "close the programs using items marked in_use first.")}
     scan_note = _scan_note(s)
     if scan_note:
-        res["note"] = scan_note + res["note"]
+        res["note"] = scan_note + " " + res["note"]
     return res
 
 
@@ -319,7 +343,8 @@ def largest_files(app, path=None, limit=20, category=None):
     d = _dir(app, path)
     limit = max(1, min(int(limit), 200))
     if category is not None and category not in KEYS:
-        raise AnalysisError(f"未知类别：{category}，可选 {', '.join(KEYS)}")
+        raise AnalysisError(L(f"未知类别：{category}，可选 {', '.join(KEYS)}",
+                              f"Unknown category: {category}. Choose one of {', '.join(KEYS)}"))
     cid = KEYS.index(category) if category else None
     if cid == RUNNING:
         prefix = _prefix(d.path)
@@ -343,7 +368,9 @@ def largest_files(app, path=None, limit=20, category=None):
 def user_view(app):
     st = app.ui_state
     if not st or not app.last_seen or time.time() - app.last_seen > 30:
-        raise AnalysisError("用户没有打开 DiskMap 窗口（或窗口里还没有扫描结果），无法获取用户正在看的内容。")
+        raise AnalysisError(L("用户没有打开 DiskMap 窗口（或窗口里还没有扫描结果），无法获取用户正在看的内容。",
+                              "The DiskMap window is not open (or has no scan yet), so what the user is "
+                              "looking at is unknown."))
     out = {"view": st.get("view"), "selected": st.get("selected"),
            "highlighted_category": st.get("pinned"),
            "updated_seconds_ago": round(time.time() - st.get("time", 0), 1)}
@@ -364,7 +391,7 @@ def show(app, path, note=None):
     s = _scan(app)
     node, f = s.find(path)
     if node is None:
-        raise AnalysisError(f"扫描结果中没有这个路径：{path}")
+        raise AnalysisError(L(f"扫描结果中没有这个路径：{path}", f"This path is not in the scan results: {path}"))
     target = node.path if f is None else join_path(node.path, f[0])
     with app.lock:
         prev = app.command["id"] if app.command else 0
@@ -372,8 +399,10 @@ def show(app, path, note=None):
                        "note": (note or "")[:200], "time": time.time()}
     connected = bool(app.last_seen and time.time() - app.last_seen < 15)
     return {"ok": True, "path": target, "window_connected": connected,
-            "message": "已让 DiskMap 窗口跳转并高亮该项目。" if connected
-            else "已记录，但 DiskMap 窗口当前似乎没有打开，用户打开后才能看到。"}
+            "message": L("已让 DiskMap 窗口跳转并高亮该项目。", "The DiskMap window now shows and highlights this item.")
+            if connected else L("已记录，但 DiskMap 窗口当前似乎没有打开，用户打开后才能看到。",
+                                "Noted, but the DiskMap window does not seem to be open; the user will see it "
+                                "after opening it.")}
 
 
 # ------------------------------------------------------------------ 命令行报告
@@ -382,57 +411,71 @@ def report_markdown(app, path=None, top=15):
     st = status(app)["scan"]
     sm = summary(app, path, top)
     cl = cleanup(app, path, limit=top)
-    L = []
-    L.append(f"# DiskMap 磁盘分析：{sm['path']}")
-    L.append("")
-    L.append(f"- 总大小：**{sm['size']}**（{sm['files']:,} 个文件，{sm['dirs']:,} 个文件夹）")
-    L.append(f"- 扫描：{st['finished_at'] or '进行中'}，用时 {st['elapsed_seconds']} 秒，"
-             f"按{'文件大小' if s.apparent else '实际占用空间'}统计")
+    in_use = sm["in_use"]
+    L_ = []
+    add = L_.append
+    add(L(f"# DiskMap 磁盘分析：{sm['path']}", f"# DiskMap disk analysis: {sm['path']}"))
+    add("")
+    add(L(f"- 总大小：**{sm['size']}**（{sm['files']:,} 个文件，{sm['dirs']:,} 个文件夹）",
+          f"- Total size: **{sm['size']}** ({sm['files']:,} files, {sm['dirs']:,} folders)"))
+    mode = L("文件大小" if s.apparent else "实际占用空间", "file length" if s.apparent else "space on disk")
+    add(L(f"- 扫描：{st['finished_at'] or '进行中'}，用时 {st['elapsed_seconds']} 秒，按{mode}统计",
+          f"- Scan: {st['finished_at'] or 'in progress'}, took {st['elapsed_seconds']} s, measured by {mode}"))
+    note = L("- 注意：", "- Note: ")
     if st.get("denied_dirs"):
-        L.append(f"- 注意：{st['denied_note']}")
+        add(note + st["denied_note"])
     if sm.get("note"):
-        L.append(f"- 注意：{sm['note']}")
-    L.append(f"- 可清理（缓存/临时）：约 **{cl['reclaimable_size']}**")
-    L.append(f"- 正被程序使用的文件：{sm['in_use']['files']} 个，共 {sm['in_use']['size']}")
-    L.append("")
-    L.append("## 按重要程度")
-    L.append("")
-    L.append("| 类别 | 大小 | 占比 |")
-    L.append("|---|---:|---:|")
+        add(note + sm["note"])
+    add(L(f"- 可清理（缓存/临时）：约 **{cl['reclaimable_size']}**",
+          f"- Reclaimable (cache / temp): about **{cl['reclaimable_size']}**"))
+    add(L(f"- 正被程序使用的文件：{in_use['files']} 个，共 {in_use['size']}",
+          f"- Files in use by programs: {in_use['files']}, {in_use['size']} in total"))
+    add("")
+    add(L("## 按重要程度", "## By importance"))
+    add("")
+    add(L("| 类别 | 大小 | 占比 |", "| Category | Size | Share |"))
+    add("|---|---:|---:|")
     for c in sm["by_category"]:
-        L.append(f"| {c['category_label']} | {c['size']} | {c['percent']}% |")
-    L.append("")
-    L.append("## 最大的子项")
-    L.append("")
-    L.append("| 路径 | 大小 | 占比 | 类别 | 原因 |")
-    L.append("|---|---:|---:|---|---|")
+        add(f"| {c['category_label']} | {c['size']} | {c['percent']}% |")
+    add("")
+    add(L("## 最大的子项", "## Largest items"))
+    add("")
+    add(L("| 路径 | 大小 | 占比 | 类别 | 原因 |", "| Path | Size | Share | Category | Reason |"))
+    add("|---|---:|---:|---|---|")
     for e in sm["largest_children"]:
         name = e["note"] if e["type"] == "group" else e["path"]
-        L.append(f"| `{name}` | {e['size']} | {e.get('percent_of_parent', '')}% | "
-                 f"{e['category_label']} | {e.get('reason') or ''} |")
-    L.append("")
-    L.append("## 最大的文件")
-    L.append("")
-    L.append("| 文件 | 大小 | 类别 | 说明 |")
-    L.append("|---|---:|---|---|")
+        add(f"| `{name}` | {e['size']} | {e.get('percent_of_parent', '')}% | "
+            f"{e['category_label']} | {e.get('reason') or ''} |")
+    add("")
+    add(L("## 最大的文件", "## Largest files"))
+    add("")
+    add(L("| 文件 | 大小 | 类别 | 说明 |", "| File | Size | Category | Details |"))
+    add("|---|---:|---|---|")
     for e in sm["largest_files"]:
-        extra = e.get("used_by") and f"正被 {e['used_by']} 使用" or e.get("package") and f"软件包 {e['package']}" or e.get("reason") or ""
-        L.append(f"| `{e['path']}` | {e['size']} | {e['category_label']} | {extra} |")
-    L.append("")
-    L.append("## 可清理候选")
-    L.append("")
+        if e.get("used_by"):
+            extra = L(f"正被 {e['used_by']} 使用", f"in use by {e['used_by']}")
+        elif e.get("package"):
+            extra = L(f"软件包 {e['package']}", f"package {e['package']}")
+        else:
+            extra = e.get("reason") or ""
+        add(f"| `{e['path']}` | {e['size']} | {e['category_label']} | {extra} |")
+    add("")
+    add(L("## 可清理候选", "## Cleanup candidates"))
+    add("")
     if cl["candidates"]:
-        L.append("| 路径 | 大小 | 原因 | 备注 |")
-        L.append("|---|---:|---|---|")
+        add(L("| 路径 | 大小 | 原因 | 备注 |", "| Path | Size | Reason | Notes |"))
+        add("|---|---:|---|---|")
         for e in cl["candidates"]:
             name = e["note"] if e["type"] == "group" else e["path"]
-            busy = f"{e['in_use_files']} 个文件正在使用" if e.get("in_use_files") else ""
-            L.append(f"| `{name}` | {e['size']} | {e.get('reason') or ''} | {busy} |")
+            busy = (L(f"{e['in_use_files']} 个文件正在使用", f"{e['in_use_files']} files in use")
+                    if e.get("in_use_files") else "")
+            add(f"| `{name}` | {e['size']} | {e.get('reason') or ''} | {busy} |")
     else:
-        L.append("没有找到明显的缓存/临时文件。")
-    L.append("")
-    L.append("> DiskMap 只读取磁盘，不会删除任何文件。以上清理建议请在确认后手动处理。")
-    return "\n".join(L) + "\n"
+        add(L("没有找到明显的缓存/临时文件。", "No obvious cache or temporary files found."))
+    add("")
+    add(L("> DiskMap 只读取磁盘，不会删除任何文件。以上清理建议请在确认后手动处理。",
+          "> DiskMap only reads the disk and never deletes files. Review the suggestions above before acting on them."))
+    return "\n".join(L_) + "\n"
 
 
 def report_json(app, path=None, top=15):

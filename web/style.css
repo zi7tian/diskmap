@@ -53,6 +53,8 @@
 
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
+/* 双语段落：只显示当前语言的那一份 */
+:root[data-lang="en"] [data-only="zh"], :root:not([data-lang="en"]) [data-only="en"] { display: none !important; }
 html, body { height: 100%; margin: 0; }
 body {
   background: var(--bg);
@@ -271,6 +273,7 @@ main { flex: 1; display: grid; grid-template-columns: 1fr 320px; min-height: 0; 
 
 /* ------------------------------------------------ AI 接入 */
 .ai-btn { position: relative; }
+.lang-btn { min-width: 0; }
 .ai-dot {
   width: 7px; height: 7px; border-radius: 50%; background: var(--c-cache);
   box-shadow: 0 0 0 0 var(--c-cache); animation: ai-pulse 1.8s ease-out infinite;

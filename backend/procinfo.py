@@ -13,9 +13,11 @@ import shutil
 import threading
 import time
 
+from .i18n import L, T
 from .osinfo import IS_LINUX, IS_WIN, pkey, swapfiles
 
-KIND_LABEL = {"exe": "正在执行", "lib": "已加载到内存", "open": "已打开", "swap": "交换文件"}
+KIND_LABEL = {"exe": T("正在执行", "executing"), "lib": T("已加载到内存", "loaded into memory"),
+              "open": T("已打开", "open"), "swap": T("交换文件", "swap file")}
 _KIND_RANK = {"exe": 0, "swap": 0, "lib": 1, "open": 2}
 _SKIP_PREFIX = ("/proc/", "/sys/", "/dev/", "/memfd:", "/run/", "/SYSV")
 
@@ -157,7 +159,7 @@ class ProcInfo:
                     raw, n, v = _collect_psutil(budget)
                 add = _adder(raw)
                 for s in swapfiles():
-                    add(s, 0, "系统", "swap")
+                    add(s, 0, T("系统", "system"), "swap")
                 self.install(raw)
                 self.nprocs, self.visible = n, v
                 self.error = None
@@ -208,9 +210,9 @@ class ProcInfo:
         for comm, _kind in slot.values():
             counts[comm] = counts.get(comm, 0) + 1
         items = sorted(counts.items(), key=lambda kv: -kv[1])
-        text = "、".join(f"{c} ×{n}" if n > 1 else c for c, n in items[:limit])
+        text = L("、", ", ").join(f"{c} ×{n}" if n > 1 else str(c) for c, n in items[:limit])
         if len(items) > limit:
-            text += f" 等 {len(items)} 个程序"
+            text += L(f" 等 {len(items)} 个程序", f" and others ({len(items)} programs)")
         return text
 
     def details(self, path, limit=40):
