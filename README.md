@@ -101,6 +101,11 @@ DiskMap analyze /home --top 20 > report.md
 DiskMap analyze C:\ --json -o report.json      # Windows
 ```
 
+**技能包（Agent Skill）**：`skills/diskmap/` 是一份 [SKILL.md](skills/diskmap/SKILL.md) 技能，教 AI 助手怎么用
+DiskMap 分析磁盘、怎么解读重要程度和安全等级、各系统上该用什么命令安全地清理。Claude Code 用户把这个文件夹复制到
+`~/.claude/skills/diskmap` 即可；需要上传 zip 的平台用 `python packaging/make_skill_zip.py` 生成
+`dist/diskmap-skill.zip`。
+
 ## 从源码运行
 
 需要 Python 3.9+。Linux 上不需要任何第三方包；Windows / macOS 建议装上 `psutil`（识别"正在使用"）和
@@ -160,6 +165,11 @@ backend/procinfo.py   正在使用的文件：Linux 读 /proc，Windows / macOS 
 backend/mounts.py     挂载点与磁盘列表
 backend/server.py     只监听 127.0.0.1 的 HTTP 接口；随机令牌 + Host 校验
 web/                  界面：Canvas 绘制的 squarified treemap
-packaging/            PyInstaller 配置与图标
+skills/diskmap/       给 AI 助手的技能包（SKILL.md + 参考文档）
+packaging/            PyInstaller 配置、图标、技能包打包脚本
 tests/                python -m unittest discover -s tests（三个系统通用，含 MCP 协议测试）
 ```
+
+## 许可证
+
+[MIT](LICENSE)。可以自由使用、修改和分发，保留版权声明即可。

@@ -89,7 +89,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           mkdir -p out stage/DiskMap
-          cp dist/DiskMap install-desktop.sh README.md stage/DiskMap/
+          cp dist/DiskMap install-desktop.sh README.md LICENSE stage/DiskMap/
           cp packaging/icons/diskmap-512.png stage/DiskMap/diskmap.png
           tar -C stage -czf out/DiskMap-${{ matrix.target }}.tar.gz DiskMap
 

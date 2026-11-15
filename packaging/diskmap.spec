@@ -71,6 +71,7 @@ else:
                     StringStruct("FileVersion", __version__),
                     StringStruct("ProductVersion", __version__),
                     StringStruct("OriginalFilename", "DiskMap.exe"),
+                    StringStruct("LegalCopyright", "Copyright (c) 2026 mahiro. MIT License."),
                 ])]),
                 VarFileInfo([VarStruct("Translation", [0x0804, 1200])]),
             ],
