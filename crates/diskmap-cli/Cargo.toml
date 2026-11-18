@@ -1,0 +1,25 @@
+[package]
+name = "diskmap-cli"
+description = "DiskMap 命令行：analyze（分析报告）、mcp（AI 接口）、serve（用浏览器打开界面）、scan（测速）"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+# 同时是库：桌面版收到 `DiskMap mcp` 这类子命令时调用 diskmap_cli::run
+[lib]
+name = "diskmap_cli"
+path = "src/lib.rs"
+
+[[bin]]
+name = "diskmap-cli"
+path = "src/main.rs"
+
+[dependencies]
+ctrlc = { version = "3.5.2", features = ["termination"] }
+diskmap-core = { path = "../diskmap-core", features = ["server"] }
+serde_json = "1.0.154"
+
+[target."cfg(windows)".dependencies]
+windows-sys = { version = "0.61.2", features = ["Win32_System_ProcessStatus", "Win32_System_Threading", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }

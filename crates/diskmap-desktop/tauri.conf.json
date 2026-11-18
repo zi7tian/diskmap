@@ -1,0 +1,27 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "DiskMap",
+  "mainBinaryName": "DiskMap",
+  "identifier": "app.diskmap.DiskMap",
+  "build": {
+    "frontendDist": "placeholder"
+  },
+  "app": {
+    "windows": [],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "macOS": {
+      "infoPlist": "Info.plist"
+    },
+    "icon": [
+      "../../assets/icons/diskmap.png",
+      "../../assets/icons/diskmap.ico",
+      "../../assets/icons/diskmap.icns"
+    ]
+  }
+}

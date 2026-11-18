@@ -1,0 +1,22 @@
+# DiskMap 2.0：Rust + Tauri 重写版。用法、构建和打包见 README.md。
+# Python 1.x 旧版在 legacy/，不属于这个 workspace。
+
+[workspace]
+resolver = "3"
+members = ["crates/diskmap-core", "crates/diskmap-cli", "crates/diskmap-desktop"]
+# 在根目录运行 cargo build / test / run 时默认不编译桌面版（Tauri 依赖多、编译慢）；
+# 需要时加 -p diskmap-desktop 或 --workspace。
+default-members = ["crates/diskmap-core", "crates/diskmap-cli"]
+
+[workspace.package]
+version = "2.0.0"
+edition = "2024"
+# 最低 Rust 版本。resolver 3 按它挑依赖版本，定得太低会让 Tauri 等依赖停在旧版；
+# 新依赖要求更高版本时（cargo 会提示 "requires Rust 1.xx"）把这里调高。
+rust-version = "1.90"
+license = "MIT"
+publish = false
+
+[profile.release]
+lto = "thin"
+strip = true

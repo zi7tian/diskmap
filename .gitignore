@@ -6,3 +6,8 @@ out/
 stage/
 .venv*/
 selftest.json
+
+# Rust 编译产物
+/target/
+# Tauri 编译时生成的权限配置结构（官方模板同样不提交）
+/crates/diskmap-desktop/gen/schemas/

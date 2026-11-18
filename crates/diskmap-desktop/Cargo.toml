@@ -1,0 +1,27 @@
+[package]
+name = "diskmap-desktop"
+description = "DiskMap 桌面程序（Tauri 2）：窗口显示本地 HTTP 接口提供的界面"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "DiskMap"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+diskmap-core = { path = "../diskmap-core", features = ["server"] }
+diskmap-cli = { path = "../diskmap-cli" }
+ctrlc = { version = "3.5.2", features = ["termination"] }
+
+[target."cfg(windows)".dependencies]
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_System_Console", "Win32_System_Threading", "Win32_Storage_FileSystem"] }
+
+[dev-dependencies]
+serde_json = "1.0.154"

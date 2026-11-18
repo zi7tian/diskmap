@@ -34,6 +34,18 @@
     <button type="button" id="cancelBtn" class="btn" hidden data-en="Stop">停止</button>
   </form>
   <div class="grow"></div>
+  <form id="searchForm" class="name-search" role="search" autocomplete="off" hidden>
+    <input id="searchInput" type="search" spellcheck="false" aria-label="按名字搜索" data-en-aria-label="Search by name"
+           aria-controls="searchPanel">
+    <button type="submit" class="btn" data-en="Search">搜索</button>
+    <div id="searchPanel" class="search-results" hidden>
+      <div class="search-head">
+        <span id="searchStatus" role="status"></span>
+        <button id="searchClose" type="button" class="btn ghost small" data-en="Close">关闭</button>
+      </div>
+      <ul id="searchItems" class="indexed-list"></ul>
+    </div>
+  </form>
   <button id="aiBtn" class="btn ghost ai-btn" title="把分析结果提供给 Claude 等 AI 助手">
     <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M8 1.5l1.4 3.6L13 6.5 9.4 7.9 8 11.5 6.6 7.9 3 6.5l3.6-1.4zM12.5 10.5l.7 1.6 1.6.7-1.6.7-.7 1.6-.7-1.6-1.6-.7 1.6-.7z" fill="currentColor"/></svg>
     <span data-en="AI access">AI 接入</span><span id="aiDot" class="ai-dot" hidden></span>
@@ -82,6 +94,7 @@
       </div>
     </div>
     <div id="busy" class="busy" hidden></div>
+    <div id="mftProgress" class="busy mft-progress" hidden></div>
   </section>
 
   <aside class="side">

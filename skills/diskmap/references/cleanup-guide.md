@@ -68,7 +68,7 @@ Space estimates come from DiskMap: use the `size` of the matching folder.
 | `%TEMP%` (`C:\Users\<name>\AppData\Local\Temp`), `C:\Windows\Temp` | Settings → System → Storage → Temporary files, or Disk Cleanup (`cleanmgr`) | Files in use are skipped automatically |
 | `C:\Windows\SoftwareDistribution\Download`, Delivery Optimization | Settings → System → Storage → Temporary files ("Windows Update Cleanup", "Delivery Optimization Files") | |
 | `C:\Windows.old` | Temporary files → "Previous Windows installation(s)" | Removes the option to roll back the last upgrade |
-| `C:\Windows\WinSxS` | `Dism.exe /Online /Cleanup-Image /AnalyzeComponentStore`, then `/StartComponentCleanup` **(admin)** | Never delete files here by hand. DiskMap overstates its size because hard links are not detected |
+| `C:\Windows\WinSxS` | `Dism.exe /Online /Cleanup-Image /AnalyzeComponentStore`, then `/StartComponentCleanup` **(admin)** | Use component servicing to clean it. A whole-volume MFT scan counts hard links once. Generic scans can overstate the size through repeated hard links |
 | `hiberfil.sys` (category `core`) | `powercfg /hibernate off` **(admin)** removes it; `powercfg /h /type reduced` shrinks it | Turning hibernation off also disables Fast Startup |
 | `pagefile.sys` (category `core`) | System → Advanced system settings → Performance → Virtual memory | Leave on automatic unless the user knows why |
 | `C:\Windows\Installer`, `C:\ProgramData\Package Cache` | Do not delete | Needed to repair, update and uninstall programs |

@@ -183,12 +183,40 @@ main { flex: 1; display: grid; grid-template-columns: 1fr 320px; min-height: 0; 
 .disk .d-bar i { display: block; height: 100%; background: var(--accent); border-radius: 3px; }
 .disk .d-nums { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
 
+.welcome.has-saved-scans .disks { grid-template-columns: repeat(auto-fill, minmax(min(100%, 220px), 1fr)); }
+.welcome.has-saved-scans .disk { min-width: 0; overflow-wrap: anywhere; }
+.welcome.has-saved-scans .disk .d-top { flex-wrap: wrap; }
+.disk-with-saved {
+  display: flex; flex-direction: column; min-width: 0;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+}
+.disk-with-saved .disk { flex: 1; width: 100%; border: 0; border-radius: 9px 9px 0 0; }
+.disk-with-saved .disk:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.disk-saved-footer { border-top: 1px solid var(--border); padding: 8px 10px; }
+.disk-saved-footer .saved-actions { margin-top: 6px; }
+.saved-actions { display: flex; flex-wrap: wrap; gap: 4px 6px; }
+.saved-note { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+.saved-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.saved-item {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; min-width: 0;
+  padding: 8px 10px; background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+}
+.saved-item-copy { flex: 1 1 15rem; min-width: 0; }
+.saved-item-path { font: 12px var(--mono); overflow-wrap: anywhere; }
+
 .busy {
   position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
   padding: 10px 16px; border-radius: 8px;
   background: var(--panel); border: 1px solid var(--border); box-shadow: var(--shadow);
   color: var(--muted);
 }
+
+.mft-progress {
+  width: max-content; max-width: calc(100% - 32px);
+  text-align: center; pointer-events: none;
+}
+.mft-progress > div + div { margin-top: 6px; }
+.mft-progress b { color: var(--text); font-weight: 600; }
 
 /* ------------------------------------------------ 侧栏 */
 .side {
@@ -257,6 +285,10 @@ main { flex: 1; display: grid; grid-template-columns: 1fr 320px; min-height: 0; 
 }
 .status b { color: var(--text); font-weight: 600; }
 .status .sep { color: var(--faint); margin: 0 7px; }
+.status.has-saved-status { white-space: normal; }
+.saved-status-row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin-bottom: 3px; }
+.saved-status-row span { color: var(--text); overflow-wrap: anywhere; }
+.saved-status-details { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 .toast {
   position: fixed; left: 50%; bottom: 44px; transform: translateX(-50%);
@@ -300,4 +332,41 @@ main { flex: 1; display: grid; grid-template-columns: 1fr 320px; min-height: 0; 
   flex: 1; min-width: 0; margin: 0; padding: 9px 11px; border-radius: 8px;
   background: var(--panel-2); border: 1px solid var(--border);
   font: 12px/1.55 var(--mono); white-space: pre-wrap; word-break: break-all;
+}
+
+/* ------------------------------------------------ 完整索引列表 */
+.name-search { position: relative; display: flex; gap: 6px; flex: 0 1 242px; min-width: 0; }
+.name-search input {
+  flex: 1; min-width: 0; width: 100%; height: 30px; padding: 0 9px;
+  background: var(--panel-2); border: 1px solid var(--border); border-radius: 6px;
+}
+.name-search input:focus, .indexed-row:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.search-results {
+  position: absolute; top: calc(100% + 8px); right: 0; z-index: 10;
+  display: flex; flex-direction: column; width: min(460px, calc(100vw - 20px));
+  max-height: min(560px, 62vh); padding: 6px;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 8px; box-shadow: var(--shadow);
+}
+.search-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 2px 6px; color: var(--muted); }
+.indexed-list { list-style: none; margin: 0; padding: 0; overflow: auto; }
+.indexed-row {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: baseline; gap: 2px 8px;
+  width: 100%; padding: 5px 7px; text-align: left; cursor: pointer;
+  border: 0; border-radius: 5px; background: transparent;
+}
+.indexed-row:hover { background: var(--hover); }
+.indexed-name, .indexed-parent { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.indexed-size, .indexed-cls, .indexed-parent { font-size: 12px; color: var(--muted); }
+.indexed-size { font-variant-numeric: tabular-nums; }
+.indexed-cls { grid-column: 1 / -1; }
+.indexed-cls .dot { margin-right: 5px; }
+/* 路径太长时截掉开头、保留末尾：方向设为从右到左，路径本身放在 <bdi> 里仍按从左到右显示 */
+.indexed-parent { grid-column: 1 / -1; font: 11.5px var(--mono); direction: rtl; text-align: left; }
+.group-items { max-height: 290px; }
+.group-more { margin-top: 6px; }
+
+@media (max-width: 790px) {
+  .topbar.with-name-search { flex-wrap: wrap; }
+  .name-search { order: 1; flex-basis: 100%; }
+  .search-results { left: 0; }
 }

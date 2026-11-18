@@ -10,6 +10,8 @@ const MIN_PX_AREA = 24;    // 小于该像素面积的项目由后端合并
 
 const S = {
   meta: null, status: null,
+  fullIndex: false, largest: null, largestRequest: null, navigation: null,
+  savedScans: [], savedListSeq: 0, openingSaved: false, scanRevision: 0,
   root: null, viewPath: null, tree: null, totals: null,
   drawList: [], hover: null, selected: null, selectedPath: null,
   hl: null, pinned: null, flash: null,
@@ -300,21 +302,34 @@ function squarify(items, x, y, w, h, place) {
   }
 }
 
-function prep(node, parent, path) {
+function prep(node, parent, path, view) {
   node.parent = parent;
   node.path = path;
   if (node.ch) {
-    for (const c of node.ch) prep(c, node, c.t === 'a' ? `${path}${SEP}\u0000${c.k}` : joinPath(path, c.n));
+    let ordinal = 0;
+    for (const c of node.ch) {
+      if (view && c.t === 'a') {
+        // 两种合并块的旧字段可能完全相等，按原始 ch 中合并块的次序区分。
+        c.group = { view, ordinal: ordinal++ };
+        const key = [c.group.ordinal, c.k, c.s, c.c, view.threshold, node.nf, node.nd].join(':');
+        prep(c, node, `${path}${SEP}\u0000${key}`, view);
+      } else {
+        prep(c, node, c.t === 'a' ? `${path}${SEP}\u0000${c.k}` : joinPath(path, c.n), view);
+      }
+    }
   }
 }
 
+let layoutVersion = 0;
 function layout() {
+  layoutVersion++;
   S.drawList = [];
   if (S.tree && S.W > 0 && S.H > 0) place(S.tree, 0, 0, S.W, S.H, 0);
 }
 
 function place(n, x, y, w, h, depth) {
   n.x = x; n.y = y; n.w = w; n.h = h; n.depth = depth; n.hdr = 0; n.kids = null;
+  if (S.fullIndex) n.layoutVersion = layoutVersion;
   S.drawList.push(n);
   if (n.t !== 'd' || !n.ch || w < 7 || h < 7) return;
   const hdr = w >= 40 && h >= 36 ? HDR : 0;
@@ -471,11 +486,13 @@ function drawOverlay() {
   octx.clearRect(0, 0, W, H);
   const hv = S.hover;
   if (hv && hv.parent && hv.t !== 'd') strokeNode(hv.parent, PAL.hoverParent, 1);
-  if (S.selected) strokeNode(S.selected, PAL.sel, 2, PAL.selHalo);
+  if (S.selected && (!S.fullIndex || S.selected.layoutVersion === layoutVersion)) {
+    strokeNode(S.selected, PAL.sel, 2, PAL.selHalo);
+  }
   if (hv && hv !== S.selected) strokeNode(hv, PAL.hover, 1.5);
   if (S.flash) {
     const t = (performance.now() - S.flash.t0) / 900;
-    if (t < 1 && S.flash.node.w > 0) {
+    if (t < 1 && S.flash.node.w > 0 && (!S.fullIndex || S.flash.node.layoutVersion === layoutVersion)) {
       const [x, y, w, h] = snap(S.flash.node);
       const grow = (1 - t) * 10;
       octx.strokeStyle = PAL.sel;
@@ -571,6 +588,18 @@ function zoomOutAnim(oldSnap, n) {
 
 let busyTimer = 0;
 async function loadView(path, opts = {}) {
+  if (!S.fullIndex) return loadTree(path, opts);
+  if (opts.live) return S.navigation ? false : loadTree(path, opts);
+  const navigation = {};
+  S.navigation = navigation;
+  try {
+    return await loadTree(path, opts);
+  } finally {
+    if (S.navigation === navigation) S.navigation = null;
+  }
+}
+
+async function loadTree(path, opts) {
   const seq = ++S.fetchSeq;
   const frac = Math.min(0.01, Math.max(1e-6, MIN_PX_AREA / (S.W * S.H)));
   const req = api(`/api/tree?path=${encodeURIComponent(path)}&frac=${frac}`);
@@ -598,20 +627,32 @@ async function loadView(path, opts = {}) {
     oldSnap.width = map.width; oldSnap.height = map.height;
     oldSnap.getContext('2d').drawImage(map, 0, 0);
   }
-  applyTree(data);
+  const view = S.fullIndex ? { path, frac, size: data.tree.s, threshold: Math.max(1, Math.floor(data.tree.s * frac)) } : null;
+  applyTree(data, view);
+  if (S.fullIndex) {
+    refreshLargest(data.state, opts.live);
+    if (opts.selectFile) selectIndexedFile(opts.selectFile);
+    else if (opts.selectRoot) select(S.tree);
+  }
   if (opts.zoomOut) zoomOutAnim(oldSnap, findByPath(opts.zoomOut));
   return true;
 }
 
-function applyTree(data) {
+function applyTree(data, view) {
   const viewChanged = data.path !== S.viewPath;
+  const clearGroup = viewChanged && S.fullIndex && S.selected?.t === 'a';
+  if (viewChanged && S.fullIndex) {
+    S.largest = null;
+    S.largestRequest = null;
+  }
   S.root = data.root;
   S.viewPath = data.path;
   S.totals = data.totals;
-  prep(data.tree, null, data.path);
+  prep(data.tree, null, data.path, view);
   S.tree = data.tree;
   layout();
-  S.selected = findByPath(S.selectedPath) || (S.selected && S.selected.path === S.selectedPath ? S.selected : null);
+  if (clearGroup) select(null);
+  else S.selected = findByPath(S.selectedPath) || (S.selected && S.selected.path === S.selectedPath ? S.selected : null);
   S.hover = S.mouse ? hit(S.mouse.x, S.mouse.y) : null;
   render();
   renderCrumbs();
@@ -672,8 +713,13 @@ function renderCrumbs() {
     : '';
 }
 
+function isReadingMft() {
+  return S.status != null && S.status.state === 'scanning' && S.status.mft_records != null;
+}
+
 function renderLegend() {
   const ul = $('legend');
+  const reading = isReadingMft();
   const classes = S.meta ? S.meta.classes : [];
   const tot = S.totals || classes.map(() => 0);
   const sum = tot.reduce((a, b) => a + Math.max(0, b), 0);
@@ -681,28 +727,65 @@ function renderLegend() {
   ul.innerHTML = classes.map((c) => {
     const v = Math.max(0, tot[c.id] || 0);
     const cls = [S.pinned === c.id ? 'active' : '', hl != null && hl !== c.id ? 'dimmed' : ''].join(' ');
+    const size = reading ? '— · —' : `${fmtBytes(v)} · ${pct(v, sum)}`;
+    const width = !reading && sum ? (v / sum) * 100 : 0;
     return `<li data-c="${c.id}" class="${cls}" title="${esc(c.desc)}">
       <span class="sw" style="background:${clsVar(c.id)}"></span>
       <span class="lb">${esc(c.label)}</span>
-      <span class="sz">${fmtBytes(v)} · ${pct(v, sum)}</span>
-      <span class="meter"><i style="width:${sum ? (v / sum) * 100 : 0}%;background:${clsVar(c.id)}"></i></span>
+      <span class="sz">${size}</span>
+      <span class="meter"><i style="width:${width}%;background:${clsVar(c.id)}"></i></span>
     </li>`;
   }).join('');
 }
 
+function refreshLargest(state, live) {
+  if (state === 'scanning' && isReadingMft()) return;
+  const path = S.viewPath;
+  const started = performance.now();
+  const previous = S.largestRequest;
+  if (live && state === 'scanning' && previous && previous.path === path && previous.state === state
+      && (previous.pending || started - previous.started < 1200)) return;
+
+  const request = { path, state, started, pending: true, failed: false };
+  S.largestRequest = request;
+  if (S.largest === null) renderTop();
+  api(`/api/largest?path=${encodeURIComponent(path)}`).then(({ files }) => {
+    if (S.largestRequest === request) S.largest = files.map(indexedFile);
+  }).catch(() => {
+    request.failed = true;
+  }).finally(() => {
+    request.pending = false;
+    if (S.largestRequest === request) renderTop();
+  });
+}
+
 function renderTop() {
-  const files = [];
-  const stack = S.tree ? [S.tree] : [];
-  while (stack.length) {
-    const n = stack.pop();
-    if (n.t === 'f') files.push(n);
-    else if (n.ch) for (const c of n.ch) stack.push(c);
+  if (isReadingMft()) {
+    $('topFiles').innerHTML = `<li class="empty">${L('读完后显示', 'Shown when reading finishes')}</li>`;
+    return;
   }
-  files.sort((a, b) => b.s - a.s);
-  const top = files.slice(0, 10);
+  let top;
+  if (S.fullIndex) {
+    top = S.largest || [];
+  } else {
+    const files = [];
+    const stack = S.tree ? [S.tree] : [];
+    while (stack.length) {
+      const n = stack.pop();
+      if (n.t === 'f') files.push(n);
+      else if (n.ch) for (const c of n.ch) stack.push(c);
+    }
+    files.sort((a, b) => b.s - a.s);
+    top = files.slice(0, 10);
+  }
   const ol = $('topFiles');
   if (!top.length) {
-    ol.innerHTML = `<li class="empty">${L('暂无', 'None')}</li>`;
+    let message = L('暂无', 'None');
+    if (S.fullIndex && S.largestRequest && S.largest === null) {
+      if (S.largestRequest.pending) message = L('正在加载…', 'Loading…');
+      else if (S.largestRequest.failed) message = L('无法读取最大文件', 'Could not load the largest files');
+    }
+    ol.innerHTML = `<li class="empty">${message}</li>`;
     return;
   }
   ol.innerHTML = top.map((f, i) => `<li data-i="${i}" title="${esc(f.path)}">
@@ -710,7 +793,8 @@ function renderTop() {
       <span class="nm">${esc(f.n)}</span><span class="sz">${fmtBytes(f.s)}</span></li>`).join('');
   ol.querySelectorAll('li').forEach((li) => {
     const f = top[+li.dataset.i];
-    li.onclick = () => { select(f); S.flash = { node: f, t0: performance.now() }; drawOverlay(); };
+    li.onclick = S.fullIndex ? () => selectIndexedFile(f)
+      : () => { select(f); S.flash = { node: f, t0: performance.now() }; drawOverlay(); };
   });
 }
 
@@ -736,6 +820,7 @@ const detailPlaceholder = () => `<p class="muted">${L('点击方框查看详情�
   'Click a box to see details; double-click to open a folder.')}</p>`;
 
 async function select(n) {
+  const selection = S.fullIndex ? (select.seq = (select.seq || 0) + 1) : null;
   S.selected = n;
   S.selectedPath = n ? n.path : null;
   drawOverlay();
@@ -746,9 +831,18 @@ async function select(n) {
     return;
   }
   if (n.t === 'a') {
-    box.innerHTML = `<div class="d-name">${L(`${fmtInt(n.k)} 个较小的项目`, `${fmtInt(n.k)} smaller items`)}</div>
+    const summary = `<div class="d-name">${L(`${fmtInt(n.k)} 个较小的项目`, `${fmtInt(n.k)} smaller items`)}</div>
       <div class="d-path">${esc(n.parent ? n.parent.path : '')}</div>
-      <dl><dt>${L('合计大小', 'Total size')}</dt><dd>${fmtBytes(n.s)}</dd><dt>${L('主要类别', 'Main category')}</dt><dd>${esc(clsLabel(n.c))}</dd></dl>
+      <dl><dt>${L('合计大小', 'Total size')}</dt><dd>${fmtBytes(n.s)}</dd><dt>${L('主要类别', 'Main category')}</dt><dd>${esc(clsLabel(n.c))}</dd></dl>`;
+    if (S.fullIndex) {
+      box.innerHTML = `${summary}
+        <p id="groupStatus" class="why" role="status"></p>
+        <ul id="groupItems" class="indexed-list group-items"></ul>
+        <button id="groupMore" class="btn small group-more" type="button" hidden>${L('显示更多', 'Show more')}</button>`;
+      loadGroup(n, selection);
+      return;
+    }
+    box.innerHTML = `${summary}
       <p class="why">${L('这些项目太小，在当前缩放下合并成一个方框显示。进入所在文件夹即可看到它们。',
         'These items are too small to show at this size, so they are drawn as one box. Open their folder to see them.')}</p>
       ${n.parent && n.parent !== S.tree ? `<div class="actions"><button class="btn small" id="aEnter">${L('进入所在文件夹', 'Open folder')}</button></div>` : ''}`;
@@ -756,7 +850,7 @@ async function select(n) {
     if (b) b.onclick = () => enter(n.parent);
     return;
   }
-  const seq = (select.seq = (select.seq || 0) + 1);
+  const seq = selection ?? (select.seq = (select.seq || 0) + 1);
   renderDetail(n, null);
   try {
     const info = await api(`/api/info?path=${encodeURIComponent(n.path)}`);
@@ -819,6 +913,8 @@ function renderDetail(n, info) {
     : '';
 
   const canEnter = isDir && n !== S.tree;
+  const parentAction = S.fullIndex && n.folder
+    ? `<button class="btn small" data-act="parent">${L('进入所在文件夹', 'Open containing folder')}</button>\n      ` : '';
   $('detail').innerHTML = `
     <div class="d-name">${esc(n.depth === 0 && n.path === S.root ? n.path : n.n)}</div>
     <div class="d-path">${esc(n.path)}</div>
@@ -829,17 +925,180 @@ function renderDetail(n, info) {
     ${info && info.gone ? `<p class="why">⚠ ${L('该项目在扫描后已被删除或移动。', 'This item was deleted or moved after the scan.')}</p>` : ''}
     <div class="actions">
       ${canEnter ? `<button class="btn small" data-act="enter">${L('进入', 'Open')}</button>` : ''}
-      <button class="btn small" data-act="reveal">${L('在文件管理器中显示', 'Show in file manager')}</button>
+      ${parentAction}<button class="btn small" data-act="reveal">${L('在文件管理器中显示', 'Show in file manager')}</button>
       <button class="btn small" data-act="copy">${L('复制路径', 'Copy path')}</button>
     </div>`;
   $('detail').querySelectorAll('[data-act]').forEach((b) => {
     b.onclick = () => {
       const act = b.dataset.act;
       if (act === 'enter') enter(n);
+      else if (act === 'parent') openContainingFolder(n);
       else if (act === 'reveal') api('/api/reveal', { path: n.path }).then(() => toast(L('已在文件管理器中打开', 'Opened in the file manager'))).catch((e) => toast(e.message));
       else if (act === 'copy') copyText(n.path);
     };
   });
+}
+
+/* ================================================================ 完整索引 */
+function indexedFile(item) {
+  return { t: 'f', n: item.name, s: item.size, c: item.cls, path: item.path, folder: item.parent };
+}
+
+function selectIndexedFile(file) {
+  const drawn = findByPath(file.path);
+  select(drawn || file);
+  if (drawn) {
+    S.flash = { node: drawn, t0: performance.now() };
+    drawOverlay();
+  }
+}
+
+function openContainingFolder(file) {
+  if (file.folder === S.viewPath) selectIndexedFile(file);
+  else return loadView(file.folder, { selectFile: file });
+}
+
+function openIndexedItem(item) {
+  if (item.type === 'dir') {
+    if (item.path === S.viewPath) select(S.tree);
+    else return loadView(item.path, { selectRoot: true });
+  } else {
+    return openContainingFolder(indexedFile(item));
+  }
+}
+
+function indexRows(items, offset = 0, showParent = false) {
+  return items.map((item, i) => `<li>
+    <button type="button" class="indexed-row" data-i="${offset + i}" title="${esc(item.path)}">
+      <span class="indexed-name">${esc(item.name)}</span><span class="indexed-size">${fmtBytes(item.size)}</span>
+      <span class="indexed-cls"><span class="dot" style="background:${clsVar(item.cls)}"></span>${esc(clsLabel(item.cls))}${item.type === 'dir' ? ` · ${L('文件夹', 'Folder')}` : ''}</span>
+      ${showParent ? `<span class="indexed-parent"><bdi>${esc(item.parent)}</bdi></span>` : ''}
+    </button>
+  </li>`).join('');
+}
+
+function loadGroup(node, selection) {
+  const status = $('groupStatus'), list = $('groupItems'), more = $('groupMore');
+  const { view, ordinal } = node.group;
+  const params = new URLSearchParams({
+    path: view.path, parent: node.parent.path, frac: view.frac, group: ordinal,
+    view_size: view.size, parent_files: node.parent.nf, parent_dirs: node.parent.nd,
+    size: node.s, count: node.k, cls: node.c,
+  });
+  const items = [];
+  list.onclick = (e) => {
+    const row = e.target.closest('button[data-i]');
+    if (!row) return;
+    const item = items[+row.dataset.i];
+    if (item.type === 'dir') openIndexedItem(item);
+    else selectIndexedFile(indexedFile(item));
+  };
+  status.textContent = L('正在加载…', 'Loading…');
+  async function loadPage(offset) {
+    const moveFocus = document.activeElement === more;
+    more.disabled = true;
+    params.set('offset', offset);
+    try {
+      const page = await api(`/api/aggregate?${params}`);
+      if (selection !== select.seq) return;
+      items.push(...page.items);
+      list.insertAdjacentHTML('beforeend', indexRows(page.items, offset));
+      status.textContent = page.kind === 'rest'
+        ? L('超过每个文件夹显示上限的文件', 'Files beyond the per-folder display limit')
+        : L('当前缩放下合并显示的项目', 'Items grouped at this zoom level');
+      more.hidden = page.next_offset === null;
+      more.onclick = () => loadPage(page.next_offset);
+      if (moveFocus) list.querySelector(`[data-i="${offset}"]`)?.focus();
+    } catch (e) {
+      if (selection !== select.seq) return;
+      status.textContent = e.message;
+      more.hidden = true;
+    } finally {
+      more.disabled = false;
+    }
+  }
+  return loadPage(0);
+}
+
+let searchSeq = 0, searchResult = null;
+function closeNameSearch(clear = false) {
+  searchSeq++;
+  searchResult = null;
+  $('searchPanel').hidden = true;
+  if (clear) $('searchInput').value = '';
+}
+
+function renderNameSearch() {
+  $('searchInput').placeholder = L('按名字搜索', 'Search by name');
+  if ($('searchPanel').hidden) return;
+  const status = $('searchStatus'), list = $('searchItems');
+  const result = searchResult;
+  list.innerHTML = result?.items ? indexRows(result.items, 0, true) : '';
+  if (!result) status.textContent = L('正在搜索…', 'Searching…');
+  else if (result.needsScan) status.textContent = L('请先扫描一个文件夹或磁盘', 'Scan a folder or drive first');
+  else if (result.failed) status.textContent = L('无法搜索扫描结果', 'Could not search the scan results');
+  else if (!result.total) status.textContent = L('没有匹配的项目', 'No matches');
+  else if (result.total > result.items.length) {
+    const shown = fmtInt(result.items.length), total = fmtInt(result.total);
+    status.textContent = L(`共 ${total} 项，显示最大的 ${shown} 项`, `Showing the largest ${shown} of ${total} matches`);
+  } else {
+    const total = fmtInt(result.total);
+    status.textContent = L(`${total} 个匹配项`, `${total} ${pl(result.total, 'match', 'matches')}`);
+  }
+}
+
+async function runNameSearch() {
+  const name = $('searchInput').value;
+  if (!name) return closeNameSearch();
+  const seq = ++searchSeq;
+  searchResult = S.status?.root ? null : { needsScan: true };
+  $('searchPanel').hidden = false;
+  renderNameSearch();
+  $('searchItems').scrollTop = 0;
+  if (searchResult) return;
+  try {
+    const result = await api(`/api/search?q=${encodeURIComponent(name)}`);
+    if (seq !== searchSeq) return;
+    searchResult = result;
+  } catch {
+    if (seq !== searchSeq) return;
+    searchResult = { failed: true };
+  }
+  renderNameSearch();
+}
+
+function bindNameSearch() {
+  const form = $('searchForm'), input = $('searchInput'), panel = $('searchPanel');
+  form.hidden = false;
+  form.closest('.topbar').classList.add('with-name-search');
+  renderNameSearch();
+  form.addEventListener('submit', (e) => { e.preventDefault(); runNameSearch(); });
+  input.addEventListener('input', () => closeNameSearch());
+  form.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !panel.hidden) {
+      e.preventDefault();
+      e.stopPropagation();
+      closeNameSearch();
+      input.focus();
+    }
+  });
+  $('searchClose').onclick = () => { closeNameSearch(); input.focus(); };
+  $('searchItems').onclick = (e) => {
+    const row = e.target.closest('button[data-i]');
+    if (!row) return;
+    const item = searchResult.items[+row.dataset.i];
+    closeNameSearch();
+    openIndexedItem(item);
+  };
+  document.addEventListener('pointerdown', (e) => {
+    if (!panel.hidden && !form.contains(e.target)) closeNameSearch();
+  });
+}
+
+function resetIndexQueries() {
+  S.largest = null; S.largestRequest = null; S.navigation = null;
+  S.fetchSeq++;
+  closeNameSearch(true);
 }
 
 function copyText(s, msg) {
@@ -903,11 +1162,16 @@ function showTooltip(n, cx, cy) {
 function renderStatus() {
   const s = S.status;
   const el = $('status');
+  updateMftUI();
   if (!s) return;
   const sep = '<span class="sep">·</span>';
   const bits = [];
   if (!s.ready) bits.push(L('正在读取软件包数据库…', 'Reading the package database…'));
-  if (s.state === 'scanning') {
+  if (s.state === 'scanning' && s.mft_records != null) {
+    bits.push(L(`正在读取 MFT，已处理 <b>${fmtInt(s.mft_records)}</b> 条记录`,
+      `Reading MFT, <b>${fmtInt(s.mft_records)}</b> ${pl(s.mft_records, 'record')} processed`),
+      L(`${s.elapsed.toFixed(1)} 秒`, `${s.elapsed.toFixed(1)} s`));
+  } else if (s.state === 'scanning') {
     bits.push(L(`正在扫描 <b>${fmtInt(s.files)}</b> 个文件`, `Scanning <b>${fmtInt(s.files)}</b> files`),
       `<b>${fmtBytes(s.bytes)}</b>`, L(`${s.elapsed.toFixed(1)} 秒`, `${s.elapsed.toFixed(1)} s`));
     if (s.current) bits.push(`<span style="font-family:var(--mono)">${esc(s.current)}</span>`);
@@ -940,7 +1204,43 @@ function renderStatus() {
     bits.push(L(`运行中 ${fmtInt(s.procs.total)} 个进程，${fmtInt(s.procs.files)} 个文件在使用`,
       `${fmtInt(s.procs.total)} processes running, ${fmtInt(s.procs.files)} files in use`));
   }
-  el.innerHTML = bits.join(sep);
+  const saved = S.fullIndex && s.saved;
+  if (S.fullIndex) el.classList.toggle('has-saved-status', !!saved);
+  if (saved) {
+    if (!$('savedRescan')) {
+      el.innerHTML = `<div class="saved-status-row"><span id="savedStatusNote"></span>
+        <button id="savedRescan" type="button" class="btn small"></button></div>
+        <div id="savedStatusDetails" class="saved-status-details"></div>`;
+    }
+    const relative = scanAge(saved.finished_at);
+    const date = new Date(saved.finished_at * 1000).toLocaleString(L('zh-CN', 'en-US'));
+    $('savedStatusNote').textContent = L(
+      `保存的结果 · ${relative}（${date}） · 数据可能已过时`,
+      `Saved result · ${relative} (${date}) · May be out of date`);
+    $('savedRescan').textContent = L('重新扫描', 'Rescan');
+    $('savedRescan').onclick = () => startScan(s.root);
+    $('savedStatusDetails').innerHTML = bits.join(sep);
+  } else {
+    el.innerHTML = bits.join(sep);
+  }
+}
+
+function updateMftUI() {
+  const reading = isReadingMft();
+  const panel = $('mftProgress');
+  const wasReading = !panel.hidden;
+  panel.hidden = !reading;
+  if (reading) {
+    const count = fmtInt(S.status.mft_records);
+    panel.innerHTML = `<div>${L('正在读取 MFT（NTFS 分区的文件总表）', 'Reading the MFT (the NTFS master file table)')}</div>
+      <div>${L(`已处理 <b>${count}</b> 条记录`, `<b>${count}</b> ${pl(S.status.mft_records, 'record')} processed`)}</div>
+      <div>${L('整张表读完后一次显示全部结果，通常只要几秒',
+        'Everything appears at once when the whole table is read, usually within seconds')}</div>`;
+  }
+  if (reading !== wasReading) {
+    renderLegend();
+    renderTop();
+  }
 }
 
 function updateScanUI() {
@@ -956,17 +1256,30 @@ function schedulePoll(ms) {
 }
 
 async function poll() {
+  if (S.openingSaved) return;
+  const revision = S.scanRevision;
+  let status;
   try {
-    S.status = await api('/api/status');
+    status = await api('/api/status');
   } catch (e) {
+    if (revision !== S.scanRevision) return;
     $('status').textContent = L('与 DiskMap 后台的连接已断开', 'Lost connection to the DiskMap backend');
     schedulePoll(3000);
     return;
   }
+  if (revision !== S.scanRevision) return;
+  const previous = S.status;
+  S.status = status;
   renderStatus();
   updateScanUI();
   renderAgentBadge();
   const s = S.status;
+  if (S.fullIndex && (previous?.saved || s.saved) &&
+      (previous?.saved?.finished_at !== s.saved?.finished_at || previous?.root !== s.root)) {
+    clearScanView();
+    S.root = s.root;
+    S.wasScanning = true;
+  }
   if (s.root && s.state !== 'idle' && document.activeElement !== $('pathInput') && $('pathInput').value !== s.root) {
     $('pathInput').value = s.root;   // 扫描可能由 AI 助手发起
   }
@@ -975,6 +1288,11 @@ async function poll() {
     S.viewPath = null; S.root = s.root; S.selected = null; S.selectedPath = null;
     $('pathInput').value = s.root;
     select(null);
+    if (S.fullIndex) {
+      resetIndexQueries();
+      renderTop();
+      S.wasScanning = true;
+    }
   }
   if (s.command && s.command.id > (S.cmdId || 0)) {
     S.cmdId = s.command.id;
@@ -982,8 +1300,13 @@ async function poll() {
   }
   if (s.state === 'scanning') {
     $('welcome').hidden = true;
+    if (S.fullIndex && !S.wasScanning) {
+      resetIndexQueries();
+      S.lastLive = 0;
+      renderTop();
+    }
     const now = performance.now();
-    if (!S.liveBusy && now - S.lastLive > 1200) {
+    if (!S.liveBusy && !S.navigation && now - S.lastLive > 1200) {
       S.lastLive = now;
       S.liveBusy = true;
       loadView(S.viewPath || s.root, { live: true }).finally(() => { S.liveBusy = false; });
@@ -991,12 +1314,17 @@ async function poll() {
     S.wasScanning = true;
     schedulePoll(500);
   } else {
-    if (S.wasScanning) {
+    if (S.fullIndex && s.state === 'done' && s.root && !$('welcome').hidden) {
+      $('welcome').hidden = true;
+      S.wasScanning = true;
+    }
+    if (S.wasScanning && !S.navigation) {
       S.wasScanning = false;
       await loadView(S.viewPath || s.root, { live: true });
-      if (S.selected) select(S.selected);
+      if (revision !== S.scanRevision) return;
+      if (S.selected && (!S.fullIndex || S.selected.t !== 'a')) select(S.selected);
     }
-    schedulePoll(s.ready ? 2000 : 500);
+    if (revision === S.scanRevision) schedulePoll(s.ready ? 2000 : 500);
   }
 }
 
@@ -1051,10 +1379,16 @@ function openAgentDialog() {
   $('aiDialog').showModal();
 }
 
-async function startScan(path) {
+function clearScanView() {
+  if (S.fullIndex) resetIndexQueries();
   S.tree = null; S.viewPath = null; S.selected = null; S.selectedPath = null; S.totals = null;
   S.pinned = null; S.hl = null;
   layout(); render(); select(null); renderLegend(); renderTop();
+}
+
+async function startScan(path) {
+  if (S.openingSaved) return;
+  clearScanView();
   try {
     S.status = await api('/api/scan', {
       path,
@@ -1067,11 +1401,119 @@ async function startScan(path) {
   }
   $('welcome').hidden = true;
   $('pathInput').value = S.status.root;
-  S.viewPath = S.status.root;
   S.lastLive = 0;
+  if (S.fullIndex) {
+    ++S.scanRevision;
+    S.wasScanning = true;
+  } else S.viewPath = S.status.root;
   renderStatus();
   updateScanUI();
   poll();
+}
+
+/* ================================================================ 保存的扫描 */
+function scanAge(finishedAt) {
+  const elapsed = Math.max(0, Math.floor(Date.now() / 1000 - finishedAt));
+  if (elapsed < 5) return L('刚刚', 'just now');
+  for (const [seconds, zh, en] of [[86400, '天', 'day'], [3600, '小时', 'hour'], [60, '分钟', 'minute'], [1, '秒', 'second']]) {
+    if (elapsed >= seconds) {
+      const n = Math.floor(elapsed / seconds);
+      return L(`${fmtInt(n)} ${zh}前`, `${fmtInt(n)} ${pl(n, en)} ago`);
+    }
+  }
+}
+
+async function refreshSavedScans() {
+  if (!S.fullIndex) return;
+  const seq = ++S.savedListSeq;
+  try {
+    const { items } = await api('/api/saved');
+    if (seq !== S.savedListSeq) return;
+    S.savedScans = items;
+    if (!$('welcome').hidden) renderDisks();
+  } catch (e) { toast(e.message); }
+}
+
+async function openSavedScan(id, button) {
+  if (!S.fullIndex || S.openingSaved) return;
+  S.openingSaved = true;
+  ++S.scanRevision;
+  clearTimeout(S.pollTimer);
+  button.disabled = true;
+  try {
+    S.status = await api('/api/saved/open', { id });
+    S.cmdId = S.status.command?.id || 0;
+    clearScanView();
+    S.root = S.status.root;
+    $('welcome').hidden = true;
+    $('pathInput').value = S.root;
+    S.lastLive = 0;
+    renderStatus();
+    updateScanUI();
+    S.wasScanning = !(await loadView(''));
+  } catch (e) {
+    toast(e.message);
+    await refreshSavedScans();
+  } finally {
+    S.openingSaved = false;
+    button.disabled = false;
+    poll();
+  }
+}
+
+async function deleteSavedScan(id, button) {
+  if (!S.fullIndex || S.openingSaved) return;
+  button.disabled = true;
+  try {
+    await api('/api/saved/delete', { id });
+    S.savedScans = S.savedScans.filter((item) => item.id !== id);
+    renderDisks();
+  } catch (e) {
+    toast(e.message);
+    await refreshSavedScans();
+  } finally {
+    button.disabled = false;
+  }
+}
+
+function savedScanActions(item) {
+  return `<div class="saved-actions">
+    <button type="button" class="btn small" data-open-saved="${esc(item.id)}">${L('打开上次结果', 'Open last result')}</button>
+    <button type="button" class="btn ghost small" data-delete-saved="${esc(item.id)}"
+      aria-label="${L('删除保存的结果', 'Delete saved result')}">${L('删除', 'Delete')}</button>
+  </div>`;
+}
+
+function bindSavedScanActions(container) {
+  container.querySelectorAll('[data-open-saved]').forEach((button) => {
+    button.onclick = () => openSavedScan(button.dataset.openSaved, button);
+  });
+  container.querySelectorAll('[data-delete-saved]').forEach((button) => {
+    button.onclick = () => deleteSavedScan(button.dataset.deleteSaved, button);
+  });
+}
+
+function renderOtherSavedScans(items) {
+  let section = $('savedOther');
+  if (!items.length) {
+    section?.remove();
+    return;
+  }
+  if (!section) {
+    section = document.createElement('section');
+    section.id = 'savedOther';
+    $('disks').after(section);
+  }
+  section.innerHTML = `<h2>${L('其他保存的结果', 'Other saved results')}</h2>
+    <ul class="saved-list">${items.map((item) => `<li class="saved-item">
+      <div class="saved-item-copy">
+        <div class="saved-item-path">${esc(item.root)}</div>
+        <div class="saved-note">${scanAge(item.finished_at)} · ${fmtBytes(item.bytes)} ·
+          ${L(`${fmtInt(item.files)} 个文件`, `${fmtInt(item.files)} ${pl(item.files, 'file')}`)}</div>
+      </div>
+      ${savedScanActions(item)}
+    </li>`).join('')}</ul>`;
+  bindSavedScanActions(section);
 }
 
 function renderDisks() {
@@ -1091,7 +1533,10 @@ function renderDisks() {
     };
   });
   cards.push({ path: home, title: L('我的主目录', 'My home folder'), sub: home });
-  box.innerHTML = cards.map((c, i) => `
+  const saved = S.fullIndex ? S.savedScans : [];
+  const attached = new Set();
+  box.innerHTML = cards.map((c, i) => {
+    const button = `
     <button class="disk" data-i="${i}">
       <div class="d-top"><span class="d-path">${esc(c.title)}</span>${c.total ? `<span class="d-fs">${esc(c.path)}</span>` : ''}</div>
       <div class="d-sub">${esc(c.sub)}</div>
@@ -1099,7 +1544,17 @@ function renderDisks() {
       <div class="d-nums">${L(`已用 ${fmtBytes(c.used)} / ${fmtBytes(c.total)} · 剩余 ${fmtBytes(c.free)}`,
         `${fmtBytes(c.used)} of ${fmtBytes(c.total)} used · ${fmtBytes(c.free)} free`)}</div>`
     : `<div class="d-nums" style="margin-top:10px">${L('只扫描个人文件', 'Personal files only')}</div>`}
-    </button>`).join('');
+    </button>`;
+    const item = saved.find((item) => i === cards.length - 1 ? item.card?.kind === 'home'
+      : item.card?.kind === 'disk' && item.card.path === c.path);
+    if (!item) return button;
+    attached.add(item.id);
+    const age = scanAge(item.finished_at);
+    return `<div class="disk-with-saved">${button}<div class="disk-saved-footer">
+      <div class="saved-note">${L(`上次扫描：${age}`, `Last scan: ${age}`)}</div>
+      ${savedScanActions(item)}
+    </div></div>`;
+  }).join('');
   box.querySelectorAll('.disk').forEach((b) => {
     b.onclick = () => {
       const c = cards[+b.dataset.i];
@@ -1107,6 +1562,11 @@ function renderDisks() {
       startScan(c.path);
     };
   });
+  if (S.fullIndex) {
+    $('welcome').classList.toggle('has-saved-scans', saved.length > 0);
+    if (attached.size) bindSavedScanActions(box);
+    renderOtherSavedScans(saved.filter((item) => !attached.has(item.id)));
+  }
 }
 
 /* ================================================================ 事件 */
@@ -1184,6 +1644,7 @@ function bindEvents() {
 
   document.addEventListener('keydown', (e) => {
     if (e.target.closest('input, select, textarea')) return;
+    if (S.fullIndex && e.target.closest('button') && e.key === 'Enter') return;
     if (e.key === 'Backspace' || e.key === 'Escape' || (e.altKey && e.key === 'ArrowLeft')) {
       e.preventDefault();
       goUp();
@@ -1221,6 +1682,7 @@ async function setLang(lang) {
   renderStatus();
   updateScanUI();
   renderAgentBadge();
+  if (S.fullIndex) renderNameSearch();
   select(S.selected && S.selected.path === S.selectedPath ? S.selected : null);
   if (S.viewPath) await loadView(S.viewPath, { live: true });   // 方框里的文字和进程说明
   else render();
@@ -1229,6 +1691,11 @@ async function setLang(lang) {
 function renderWelcome() {
   $('welcomeHint').innerHTML = L('', ' ') + osText().hint;
   renderDisks();
+}
+
+function supportsFullIndex(meta) {
+  const version = /^(\d+)(?:\.|$)/.exec(meta.version);
+  return version !== null && Number(version[1]) >= 2;
 }
 
 async function init() {
@@ -1249,6 +1716,8 @@ async function init() {
     $('detail').innerHTML = detailPlaceholder();
   }
   SEP = S.meta.sep || '/';
+  S.fullIndex = supportsFullIndex(S.meta);
+  if (S.fullIndex) bindNameSearch();
   document.documentElement.dataset.os = S.meta.os;
   $('version').textContent = `v${S.meta.version}`;
   if (!S.status || S.status.state === 'idle') $('pathInput').value = S.meta.system_root;
@@ -1267,6 +1736,8 @@ async function init() {
     const ok = want && await loadView(want);
     if (!ok) await loadView(S.status.root);
     S.wasScanning = S.status.state === 'scanning';
+  } else if (S.fullIndex) {
+    refreshSavedScans();
   }
   poll();
 }
