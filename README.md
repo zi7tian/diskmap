@@ -1,5 +1,7 @@
 # DiskMap 2.0 磁盘地图
 
+[![M8ven Score](https://m8ven.ai/badge/mcp/zi7tian-diskmap-skegpy?v=9d90e81ee3f93a0163de63adb6e3c0b5)](https://m8ven.ai/mcp/zi7tian-diskmap-skegpy?s=readme)
+
 用“方框套方框”的方式查看磁盘空间都去哪儿了。每个方框代表一个文件或文件夹，面积与它占用的空间成正比。
 颜色表示**重要程度**，界面详情和 MCP 服务会给出分类原因及清理建议。
 
